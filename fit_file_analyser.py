@@ -1,105 +1,97 @@
-# Import necessary libraries for widgets, math, and plotting
-import math
+import streamlit as st
 import matplotlib.pyplot as plt
-from ipywidgets import interactive, IntSlider, FloatSlider, fixed
-from IPython.display import display
+import numpy as np
+import math as m
+import pandas as pd
 
-# Set a clean and professional plot style
-plt.style.use('seaborn-v0_8-whitegrid')
+# --- App Title ---
+st.title("W'bal Model Calculator")
+st.markdown("Adjust the parameters in the sidebar to model W' balance over repeated intervals.")
 
+# --- Sidebar for User Inputs ---
+st.sidebar.header("Model Inputs")
+# Use number_input for type-in boxes
+reps = st.sidebar.number_input("Number of Reps", min_value=1, max_value=50, value=5, step=1)
+CP = st.sidebar.number_input("Critical Power (CP)", min_value=100, max_value=500, value=300, step=1)
+WP = st.sidebar.number_input("W' Prime (W'P)", min_value=10000, max_value=50000, value=20000, step=100)
+duration = st.sidebar.number_input("Work Interval Duration (s)", min_value=10, max_value=1200, value=180, step=1)
+work_power = st.sidebar.number_input("Work Interval Power (W)", min_value=100, max_value=1000, value=360, step=1)
+recovery = st.sidebar.number_input("Recovery Interval Duration (s)", min_value=10, max_value=1200, value=180, step=1)
+recovery_power = st.sidebar.number_input("Recovery Interval Power (W)", min_value=0, max_value=500, value=200, step=1)
 
-def get_user_input():
-    """
-    Prompts the user to enter the session and athlete parameters.
-    Uses a loop with error handling to ensure valid integer inputs.
-    """
-    print("Please enter the session and athlete parameters:")
-    while True:
-        try:
-            reps = int(input("Number of repetitions (e.g., 5): "))
-            duration = int(input("Work interval duration in seconds (e.g., 40): "))
-            recovery = int(input("Recovery interval duration in seconds (e.g., 80): "))
-            work_power = int(input("Work interval power in watts (e.g., 400): "))
-            recovery_power = int(input("Recovery interval power in watts (e.g., 259): "))
-            CP = int(input("Critical Power (CP) in watts (e.g., 260): "))
-            WP = int(input("W' (W prime) in joules (e.g., 28000): "))
-            print("-" * 30) # Separator for clarity
-            return reps, duration, recovery, work_power, recovery_power, CP, WP
-        except ValueError:
-            print("\nInvalid input. Please enter whole numbers only. Let's try again.\n")
+st.sidebar.header("Advanced Parameters")
+# Keep sliders for A and B
+A = st.sidebar.slider("Tau Constant (A)", 1000, 10000, 5184)
+B = st.sidebar.slider("Tau Exponent (B)", -1.0, -0.1, -0.60, step=0.01)
 
 
-def run_simulation_and_plot(A, B, reps, duration, recovery, work_power, recovery_power, CP, WP):
-    """
-    Simulates and plots the W' balance for an interval session.
-    This function is called by the interactive widget whenever a slider is moved.
-    """
-    # --- 1. W' Balance Calculation ---
-    Wexp = 0
-    Wbal = WP
-    time = [0]
-    W_bal = [WP]
-    current_time = 0
+# --- Calculation Logic ---
+# Initialize variables
+Wbal = WP
+Wexp = 0
+time = []
+W_bal = []
+power = []
+end_time = 0
 
-    for i in range(reps):
-        # --- Work Interval ---
-        for t in range(1, duration + 1):
-            if work_power > CP:
-                Wbal -= (work_power - CP)
-            Wbal = max(0, Wbal) # Ensure W' doesn't go below zero
-            current_time += 1
-            time.append(current_time)
-            W_bal.append(Wbal)
-
-        # --- Recovery Interval ---
-        Wexp = WP - Wbal
-        for t in range(1, recovery + 1):
-            if recovery_power < CP:
-                DCP = CP - recovery_power
-                # This calculation can fail if DCP is negative, which shouldn't happen here.
-                # We add a small value to avoid math domain errors if DCP is zero.
-                Tau = A * ((DCP + 1e-9) ** B)
-                Wbal = WP - (Wexp * math.exp(-t / Tau))
-            
-            Wbal = min(WP, Wbal) # Ensure W' doesn't exceed its maximum
-            current_time += 1
-            time.append(current_time)
-            W_bal.append(Wbal)
+for i in range(reps):
+    # Work phase
+    for t in range(duration):
+        P1 = work_power
+        # W'bal cannot go below zero
+        expenditure = P1 - CP
+        if expenditure > 0:
+            Wbal = max(0, Wbal - expenditure)
         
         Wexp = WP - Wbal
+        time.append(t + end_time)
+        W_bal.append(Wbal)
+        power.append(P1)
 
-    # --- 2. Plotting the Results ---
-    plt.figure(figsize=(12, 7))
-    plt.plot(time, W_bal, label="W' Balance", color='#2980b9', linewidth=2)
-    plt.xlabel('Time (s)', fontsize=12)
-    plt.ylabel("W' Balance (J)", fontsize=12)
-    plt.title("W' Balance During Interval Training", fontsize=16, weight='bold')
-    plt.ylim(0, WP * 1.05)
-    plt.xlim(0, current_time)
-    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
-    plt.legend()
-    plt.show()
+    # Recovery phase
+    for t in range(recovery):
+        P2 = recovery_power
+        DCP = CP - P2
+        # Avoid math errors if recovery power is at or above CP
+        if DCP <= 0:
+            Tau = float('inf') # Effectively no recovery
+        else:
+            Tau = A * (DCP ** B)
+        
+        # Calculate new W'bal during recovery
+        Wbal = WP - (Wexp * m.exp(-(t+1) / Tau))
+        Wbal = min(WP, Wbal) # W'bal cannot exceed W'P
+        
+        Wexp = WP - Wbal
+        time.append(end_time + duration + t)
+        W_bal.append(Wbal)
+        power.append(P2)
 
+    end_time = (i + 1) * (duration + recovery)
 
-# --- Main Execution ---
-# First, get the fixed parameters from the user
-reps, duration, recovery, work_power, recovery_power, CP, WP = get_user_input()
+# --- Display Results ---
 
-# Then, create the interactive widget with sliders for A and B
-interactive_plot = interactive(
-    run_simulation_and_plot,
-    A=IntSlider(min=0, max=10000, step=100, value=5184, description='A:', continuous_update=False),
-    B=FloatSlider(min=-0.2, max=1.4, step=0.01, value=-0.60, description='B:', continuous_update=False),
-    # Pass the user-inputted values as fixed arguments that don't change
-    reps=fixed(reps),
-    duration=fixed(duration),
-    recovery=fixed(recovery),
-    work_power=fixed(work_power),
-    recovery_power=fixed(recovery_power),
-    CP=fixed(CP),
-    WP=fixed(WP)
-)
+# Check if data was generated before trying to plot or display
+if time:
+    # 1. Display the plot
+    st.header("W'bal vs. Time")
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(time, W_bal)
+    ax.set_xlabel('Time (s)')
+    ax.set_ylabel("W'bal (J)")
+    ax.set_title("W'bal vs Time")
+    ax.grid(True)
+    ax.hlines(WP, 0, max(time), colors='grey', linestyles='--')
+    ax.hlines(0, 0, max(time), colors='grey', linestyles='--')
+    st.pyplot(fig)
 
-# Display the interactive controls and the plot
-print("Adjust the sliders for the recovery parameters A and B to update the plot.")
-display(interactive_plot)
+    # 2. Display the data in a table
+    st.header("Output Data")
+    df = pd.DataFrame({
+        'Time (s)': time,
+        'Power (W)': power,
+        'W′bal (J)': W_bal
+    })
+    st.dataframe(df)
+else:
+    st.warning("No data generated. Increase the number of reps to at least 1.")
