@@ -64,10 +64,10 @@ else:
     power_curve = (W_prime / time_curve) + CP
 
     # Create the plot with Plotly
-    fig = go.Figure()
+    fig_pd = go.Figure()
 
     # Add the CP line first (for shading reference)
-    fig.add_trace(go.Scatter(
+    fig_pd.add_trace(go.Scatter(
         x=time_curve,
         y=[CP] * len(time_curve),
         mode='lines',
@@ -76,7 +76,7 @@ else:
     ))
 
     # Add the main power curve with shading
-    fig.add_trace(go.Scatter(
+    fig_pd.add_trace(go.Scatter(
         x=time_curve, 
         y=power_curve, 
         mode='lines', 
@@ -87,14 +87,14 @@ else:
     ))
 
     # Add markers for the input powers
-    fig.add_trace(go.Scatter(
+    fig_pd.add_trace(go.Scatter(
         x=[t1], 
         y=[p3], 
         mode='markers', 
         name=f'3-min Power ({p3}W)',
         marker=dict(color='#FF5733', size=10, symbol='circle')
     ))
-    fig.add_trace(go.Scatter(
+    fig_pd.add_trace(go.Scatter(
         x=[t2], 
         y=[p12], 
         mode='markers', 
@@ -103,7 +103,7 @@ else:
     ))
 
     # Update layout for a modern look and set axis ranges
-    fig.update_layout(
+    fig_pd.update_layout(
         title="Power-Duration Curve",
         xaxis_title="Time (s)",
         yaxis_title="Power (W)",
@@ -115,12 +115,65 @@ else:
     )
     
     # Add solid axis lines, inside ticks, and remove gridlines for a cleaner look
-    fig.update_xaxes(showline=True, linewidth=2, linecolor='black', ticks='inside', showgrid=False)
-    fig.update_yaxes(showline=True, linewidth=2, linecolor='black', ticks='inside', showgrid=False)
+    fig_pd.update_xaxes(showline=True, linewidth=2, linecolor='black', ticks='inside', showgrid=False)
+    fig_pd.update_yaxes(showline=True, linewidth=2, linecolor='black', ticks='inside', showgrid=False)
 
-
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig_pd, use_container_width=True)
     
+    # --- Linear Work vs. Time Graph ---
+    with st.expander("Show Linear Model (Work vs. Time)"):
+        fig_linear = go.Figure()
+
+        # Add the two test points
+        fig_linear.add_trace(go.Scatter(
+            x=[t1, t2],
+            y=[work1, work2],
+            mode='markers',
+            name='Test Efforts',
+            marker=dict(color='red', size=10)
+        ))
+
+        # Add the line connecting the points and extending to the y-axis
+        # The line is y = CP*x + W'
+        x_vals = np.array([0, t2])
+        y_vals = CP * x_vals + W_prime
+        fig_linear.add_trace(go.Scatter(
+            x=x_vals,
+            y=y_vals,
+            mode='lines',
+            name='Linear Relationship',
+            line=dict(color='blue', dash='dash')
+        ))
+        
+        fig_linear.update_layout(
+            title="Linear Model: Work vs. Time",
+            xaxis_title="Time (s)",
+            yaxis_title="Work (Joules)",
+            template="plotly_white",
+            font=dict(color="black")
+        )
+        fig_linear.update_xaxes(showline=True, linewidth=2, linecolor='black', ticks='inside', showgrid=False)
+        fig_linear.update_yaxes(showline=True, linewidth=2, linecolor='black', ticks='inside', showgrid=False)
+        
+        st.plotly_chart(fig_linear, use_container_width=True)
+        st.markdown(f"The slope of the line is your **Critical Power ({CP:.1f} W)**, and the y-intercept is your **W' ({W_prime_kj:.1f} kJ)**.")
+
+    # --- Comparison Section ---
+    with st.expander("Compare To Previous Results"):
+        st.subheader("Enter Previous Values")
+        prev_cp = st.number_input("Previous CP (W)", value=0, step=1)
+        prev_w_prime_kj = st.number_input("Previous W' (kJ)", value=0.0, step=0.1)
+
+        if prev_cp > 0 and prev_w_prime_kj > 0:
+            st.subheader("Comparison")
+            delta_cp = CP - prev_cp
+            delta_w_prime_kj = W_prime_kj - prev_w_prime_kj
+            
+            # Use st.metric's delta feature for visualization
+            comp_col1, comp_col2 = st.columns(2)
+            comp_col1.metric("Critical Power (CP)", f"{CP:.0f} W", f"{delta_cp:.0f} W")
+            comp_col2.metric("W' (Work Capacity)", f"{W_prime_kj:.1f} kJ", f"{delta_w_prime_kj:.1f} kJ")
+
     # --- Maximal Sustainable Power Calculator ---
     with st.expander("Calculate Maximal Sustainable Power for a Custom Duration"):
         duration_input_min = st.number_input("Enter duration (minutes)", min_value=3, max_value=15, value=5, step=1, key="msp_input")
