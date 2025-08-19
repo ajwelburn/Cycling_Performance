@@ -1,9 +1,9 @@
 import streamlit as st
 import numpy as np
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 
 # --- App Title ---
-st.title("CP and W' Calculator")
+st.title("⚡ CP and W' Calculator")
 st.markdown("Enter your 3-minute and 12-minute maximal power, and your weight, to calculate your Critical Power and W'.")
 
 # --- Sidebar for User Inputs ---
@@ -42,7 +42,7 @@ else:
     vo2max_pred = (0.01095 * cp_w_kg + 0.02388) * weight
 
     # --- Display Results in Data Boxes ---
-    st.header("Your Calculated Metrics")
+    st.header("📈 Your Calculated Metrics")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Critical Power (CP)", f"{CP:.0f} W")
     col2.metric("W' (Work Capacity)", f"{W_prime_kj:.1f} kJ")
@@ -53,38 +53,60 @@ else:
     
     col5, col6 = st.columns(2)
     col5.metric("Estimated LT1 (±9%)", f"{lt1_lower:.0f} - {lt1_upper:.0f} W")
-    col6.metric("Predicted VO2max", f"{vo2max_pred:.2f} L/min")
+    col6.metric("Predicted VO₂max", f"{vo2max_pred:.2f} L/min")
 
 
     # --- Power-Duration Curve ---
-    st.header("Your Power-Duration Curve")
+    st.header("📊 Your Power-Duration Curve")
     
     # Generate time data from 10s to 900s
     time_curve = np.arange(10, 901)
-    
-    # Calculate power using the formula P = (W' / t) + CP
     power_curve = (W_prime / time_curve) + CP
-    
-    # Create the plot with modern colors
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(time_curve, power_curve, label="Power-Duration Curve", color="#007ACC", linewidth=2)
-    ax.set_xlabel('Time (s)')
-    ax.set_ylabel("Power (W)")
-    ax.set_title("Power-Duration Curve")
-    ax.grid(True, linestyle='--', alpha=0.6)
-    
-    # Add markers for the input powers
-    ax.plot(t1, p3, marker='o', color='#FF5733', markersize=8, linestyle='None', label=f'3-min Power ({p3}W)')
-    ax.plot(t2, p12, marker='o', color='#33C1FF', markersize=8, linestyle='None', label=f'12-min Power ({p12}W)')
-    ax.legend()
 
-    st.pyplot(fig)
+    # Create the plot with Plotly
+    fig = go.Figure()
+
+    # Add the main power curve
+    fig.add_trace(go.Scatter(
+        x=time_curve, 
+        y=power_curve, 
+        mode='lines', 
+        name='Power-Duration Curve',
+        line=dict(color='#007ACC', width=3)
+    ))
+
+    # Add markers for the input powers
+    fig.add_trace(go.Scatter(
+        x=[t1], 
+        y=[p3], 
+        mode='markers', 
+        name=f'3-min Power ({p3}W)',
+        marker=dict(color='#FF5733', size=10, symbol='circle')
+    ))
+    fig.add_trace(go.Scatter(
+        x=[t2], 
+        y=[p12], 
+        mode='markers', 
+        name=f'12-min Power ({p12}W)',
+        marker=dict(color='#33C1FF', size=10, symbol='circle')
+    ))
+
+    # Update layout for a modern look
+    fig.update_layout(
+        title="Power-Duration Curve",
+        xaxis_title="Time (s)",
+        yaxis_title="Power (W)",
+        legend_title="Legend",
+        template="plotly_white" # Use a clean template
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
     
     # --- Maximal Sustainable Power Calculator ---
-    st.header("Maximal Sustainable Power Calculator")
-    duration_input_min = st.number_input("Enter duration (minutes)", min_value=3, max_value=15, value=5, step=1)
-    
-    duration_input_sec = duration_input_min * 60
-    msp = (W_prime / duration_input_sec) + CP
-    
-    st.metric(f"Predicted Max Power for {duration_input_min} minutes", f"{msp:.0f} W")
+    with st.expander("Calculate Maximal Sustainable Power for a Custom Duration"):
+        duration_input_min = st.number_input("Enter duration (minutes)", min_value=3, max_value=15, value=5, step=1, key="msp_input")
+        
+        duration_input_sec = duration_input_min * 60
+        msp = (W_prime / duration_input_sec) + CP
+        
+        st.metric(f"Predicted Max Power for {duration_input_min} minutes", f"{msp:.0f} W")
