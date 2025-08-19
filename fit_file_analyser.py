@@ -1,87 +1,114 @@
 import streamlit as st
-import pandas as pd
-from fitparse import FitFile
 import matplotlib.pyplot as plt
+import numpy as np
+import math as m
+import pandas as pd
+from io import BytesIO
 
-# --- App Title and Description ---
-st.set_page_config(page_title="Cycling FIT File Analyzer", layout="wide")
-st.title("🚴 Cycling FIT File Analyzer")
-st.markdown("Upload your `.fit` file to see basic stats and graphs from your ride.")
+# --- App Title ---
+st.title("W'bal Model Calculator")
+st.markdown("Adjust the parameters in the sidebar to model W' balance over repeated intervals.")
 
-# --- File Uploader ---
-uploaded_file = st.file_uploader("Choose a FIT file", type="fit")
+# --- Sidebar for User Inputs ---
+st.sidebar.header("Model Inputs")
+reps = st.sidebar.slider("Number of Reps", 1, 20, 5)
+CP = st.sidebar.slider("Critical Power (CP)", 100, 500, 300)
+WP = st.sidebar.slider("W' Prime (W'P)", 10000, 30000, 20000)
+duration = st.sidebar.slider("Work Interval Duration (s)", 30, 600, 180)
+work_power = st.sidebar.slider("Work Interval Power (W)", 200, 800, 360)
+recovery = st.sidebar.slider("Recovery Interval Duration (s)", 30, 600, 180)
+recovery_power = st.sidebar.slider("Recovery Interval Power (W)", 50, 250, 200)
 
-if uploaded_file is not None:
-    st.success("File uploaded successfully!")
+st.sidebar.header("Advanced Parameters")
+A = st.sidebar.slider("Tau Constant (A)", 1000, 10000, 5184)
+B = st.sidebar.slider("Tau Exponent (B)", -1.0, -0.1, -0.60)
 
-    # --- Data Processing ---
-    try:
-        # Parse the FIT file
-        fitfile = FitFile(uploaded_file)
+
+# --- Calculation Logic ---
+# This part is the same as your original script, but uses the slider values
+
+# Initialize variables
+Wbal = WP
+Wexp = 0
+time = []
+W_bal = []
+power = []
+end_time = 0
+
+for i in range(reps):
+    # Work phase
+    for t in range(duration):
+        P1 = work_power
+        # W'bal cannot go below zero
+        expenditure = P1 - CP
+        if expenditure > 0:
+            Wbal = max(0, Wbal - expenditure)
         
-        # Extract record messages (contain the main ride data)
-        records = []
-        for record in fitfile.get_messages("record"):
-            # Get all data fields that are not None
-            r = {}
-            for record_data in record:
-                if record_data.value is not None:
-                    r[record_data.name] = record_data.value
-            if r: # Only append if the record is not empty
-                records.append(r)
-        
-        if not records:
-            st.warning("No record data found in the FIT file.")
+        Wexp = WP - Wbal
+        time.append(t + end_time)
+        W_bal.append(Wbal)
+        power.append(P1)
+
+    # Recovery phase
+    for t in range(recovery):
+        P2 = recovery_power
+        DCP = CP - P2
+        # Avoid math errors if recovery power is at or above CP
+        if DCP <= 0:
+            Tau = float('inf') # Effectively no recovery
         else:
-            # Convert to a pandas DataFrame
-            df = pd.DataFrame(records)
+            Tau = A * (DCP ** B)
+        
+        # Calculate new W'bal during recovery
+        Wbal = WP - (Wexp * m.exp(-(t+1) / Tau))
+        Wbal = min(WP, Wbal) # W'bal cannot exceed W'P
+        
+        Wexp = WP - Wbal
+        time.append(end_time + duration + t)
+        W_bal.append(Wbal)
+        power.append(P2)
 
-            st.header("Ride Data Overview")
-            st.dataframe(df.head())
+    end_time = (i + 1) * (duration + recovery)
 
-            # --- Basic Stats ---
-            st.header("Key Ride Metrics")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            if 'distance' in df.columns:
-                total_distance_km = df['distance'].max() / 1000
-                col1.metric("Total Distance", f"{total_distance_km:.2f} km")
+# --- Display Results ---
 
-            if 'enhanced_speed' in df.columns:
-                avg_speed_kmh = df['enhanced_speed'].mean() * 3.6
-                col2.metric("Average Speed", f"{avg_speed_kmh:.2f} km/h")
-            
-            if 'heart_rate' in df.columns:
-                avg_hr = df['heart_rate'].mean()
-                col3.metric("Average Heart Rate", f"{avg_hr:.0f} bpm")
-
-            if 'cadence' in df.columns:
-                avg_cadence = df['cadence'].mean()
-                col4.metric("Average Cadence", f"{avg_cadence:.0f} rpm")
+# 1. Display the plot
+st.header("W'bal vs. Time")
+fig, ax = plt.subplots(figsize=(10, 5))
+ax.plot(time, W_bal)
+ax.set_xlabel('Time (s)')
+ax.set_ylabel('W′bal (J)')
+ax.set_title('W′bal vs Time')
+ax.grid(True)
+ax.hlines(WP, 0, max(time), colors='grey', linestyles='--')
+ax.hlines(0, 0, max(time), colors='grey', linestyles='--')
+st.pyplot(fig)
 
 
-            # --- Data Visualization ---
-            st.header("Data Plots")
-            
-            # Select columns to plot
-            plot_options = [col for col in ['heart_rate', 'enhanced_speed', 'cadence', 'power'] if col in df.columns]
-            
-            if plot_options:
-                selected_metric = st.selectbox("Select a metric to plot over time:", plot_options)
+# 2. Display the data in a table
+st.header("Output Data")
+df = pd.DataFrame({
+    'Time (s)': time,
+    'Power (W)': power,
+    'W′bal (J)': W_bal
+})
+st.dataframe(df)
 
-                fig, ax = plt.subplots(figsize=(10, 4))
-                ax.plot(df['timestamp'], df[selected_metric])
-                ax.set_title(f"{selected_metric.replace('_', ' ').title()} Over Time")
-                ax.set_xlabel("Time")
-                ax.set_ylabel(selected_metric.replace('_', ' ').title())
-                st.pyplot(fig)
-            else:
-                st.info("No plottable data (like heart rate, speed, cadence, or power) was found.")
+# 3. Create a download button for the data
+# Function to convert DataFrame to Excel in memory
+def to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Wbal_Output')
+    processed_data = output.getvalue()
+    return processed_data
 
-    except Exception as e:
-        st.error(f"An error occurred while processing the file: {e}")
-        st.error("This could be due to a corrupted file or an unsupported format.")
+excel_data = to_excel(df)
 
-else:
-    st.info("Awaiting file upload...")
+st.download_button(
+    label="📥 Download Data as Excel",
+    data=excel_data,
+    file_name="Wbal_output.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+
