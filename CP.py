@@ -1,4 +1,4 @@
-import streamlit as st
+iimport streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -31,13 +31,30 @@ else:
     # Calculate derived metrics
     W_prime_kj = W_prime / 1000
     cp_w_kg = CP / weight
+    w_prime_j_kg = W_prime / weight
+    
+    # Estimate LT1 and its range
+    lt1_est = (0.8572 * CP) - 30.45
+    lt1_lower = lt1_est * 0.91
+    lt1_upper = lt1_est * 1.09
+    
+    # Predict VO2max
+    vo2max_pred = (0.01095 * cp_w_kg + 0.02388) * weight
 
     # --- Display Results in Data Boxes ---
     st.header("Your Calculated Metrics")
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Critical Power (CP)", f"{CP:.0f} W")
     col2.metric("W' (Work Capacity)", f"{W_prime_kj:.1f} kJ")
     col3.metric("CP (Relative)", f"{cp_w_kg:.2f} W/kg")
+    col4.metric("W' (Relative)", f"{w_prime_j_kg:.1f} J/kg")
+
+    st.markdown("---") # Visual separator
+    
+    col5, col6 = st.columns(2)
+    col5.metric("Estimated LT1 (±9%)", f"{lt1_lower:.0f} - {lt1_upper:.0f} W")
+    col6.metric("Predicted VO2max", f"{vo2max_pred:.2f} L/min")
+
 
     # --- Power-Duration Curve ---
     st.header("Your Power-Duration Curve")
@@ -48,18 +65,26 @@ else:
     # Calculate power using the formula P = (W' / t) + CP
     power_curve = (W_prime / time_curve) + CP
     
-    # Create the plot
+    # Create the plot with modern colors
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(time_curve, power_curve, label="Power-Duration Curve")
+    ax.plot(time_curve, power_curve, label="Power-Duration Curve", color="#007ACC", linewidth=2)
     ax.set_xlabel('Time (s)')
     ax.set_ylabel("Power (W)")
     ax.set_title("Power-Duration Curve")
-    ax.grid(True)
-    ax.legend()
+    ax.grid(True, linestyle='--', alpha=0.6)
     
     # Add markers for the input powers
-    ax.plot(t1, p3, 'ro', label=f'3-min Power ({p3}W)')
-    ax.plot(t2, p12, 'go', label=f'12-min Power ({p12}W)')
+    ax.plot(t1, p3, marker='o', color='#FF5733', markersize=8, linestyle='None', label=f'3-min Power ({p3}W)')
+    ax.plot(t2, p12, marker='o', color='#33C1FF', markersize=8, linestyle='None', label=f'12-min Power ({p12}W)')
     ax.legend()
 
     st.pyplot(fig)
+    
+    # --- Maximal Sustainable Power Calculator ---
+    st.header("Maximal Sustainable Power Calculator")
+    duration_input_min = st.number_input("Enter duration (minutes)", min_value=3, max_value=15, value=5, step=1)
+    
+    duration_input_sec = duration_input_min * 60
+    msp = (W_prime / duration_input_sec) + CP
+    
+    st.metric(f"Predicted Max Power for {duration_input_min} minutes", f"{msp:.0f} W")
