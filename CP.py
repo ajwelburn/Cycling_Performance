@@ -41,8 +41,11 @@ else:
     lt1_lower = lt1_est * 0.91
     lt1_upper = lt1_est * 1.09
     
-    # Predict VO2max
-    vo2max_pred = (0.01095 * cp_w_kg + 0.02388) * weight
+    # Predict VO2max using the new MAP formula
+    MAP = (W_prime / 220) + CP
+    vo2max_l_min = (0.01095 * MAP) + 0.02388
+    vo2max_ml_kg_min = (vo2max_l_min * 1000) / weight
+
 
     # --- Display Results in Data Boxes ---
     st.header("📈 Your Calculated Metrics")
@@ -54,9 +57,10 @@ else:
 
     st.markdown("---") # Visual separator
     
-    col5, col6 = st.columns(2)
+    col5, col6, col7 = st.columns(3)
     col5.metric("Estimated LT1 (±9%)", f"{lt1_lower:.0f} - {lt1_upper:.0f} W")
-    col6.metric("Predicted VO₂max", f"{vo2max_pred:.2f} L/min")
+    col6.metric("Predicted VO₂max (abs)", f"{vo2max_l_min:.2f} L/min")
+    col7.metric("Predicted VO₂max (rel)", f"{vo2max_ml_kg_min:.1f} ml/min/kg")
 
 
     # --- Power-Duration Curve ---
