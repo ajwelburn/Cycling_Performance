@@ -2,6 +2,59 @@ import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
 
+# --- Custom CSS for metric styling ---
+st.markdown("""
+<style>
+.metric-container {
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    margin-bottom: 10px;
+}
+.metric-label {
+    font-size: 0.9rem;
+    color: #808495;
+}
+.metric-value-container {
+    display: flex;
+    align-items: baseline;
+}
+.metric-value {
+    font-size: 1.75rem;
+    font-weight: bold;
+}
+.metric-unit {
+    font-size: 1rem;
+    margin-left: 0.3rem;
+}
+.metric-delta {
+    font-size: 0.9rem;
+    margin-left: 0.5rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# --- Helper function to create custom metric ---
+def custom_metric(label, value, unit, delta=None, delta_unit=""):
+    delta_html = ""
+    if delta is not None:
+        delta_color = "green" if delta >= 0 else "red"
+        delta_sign = "+" if delta >= 0 else ""
+        delta_html = f'<span class="metric-delta" style="color: {delta_color};">{delta_sign}{delta:.1f}{delta_unit}</span>'
+
+    st.markdown(f"""
+        <div class="metric-label">{label}</div>
+        <div class="metric-value-container">
+            <span class="metric-value">{value}</span>
+            <span class="metric-unit">{unit}</span>
+            {delta_html}
+        </div>
+    """, unsafe_allow_html=True)
+
+
 # --- App Title ---
 st.title("⚡ CP and W' Calculator")
 st.markdown("Enter your 3-minute and 12-minute maximal power, and your weight, to calculate your Critical Power and W'.")
@@ -50,17 +103,24 @@ else:
     # --- Display Results in Data Boxes ---
     st.header("📈 Your Calculated Metrics")
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Critical Power (CP)", f"{CP:.0f} W")
-    col2.metric("W' (Work Capacity)", f"{W_prime_kj:.1f} kJ")
-    col3.metric("CP (Relative)", f"{cp_w_kg:.2f} W/kg")
-    col4.metric("W' (Relative)", f"{w_prime_j_kg:.1f} J/kg")
+    with col1:
+        custom_metric("Critical Power (CP)", f"{CP:.0f}", "W")
+    with col2:
+        custom_metric("W' (Work Capacity)", f"{W_prime_kj:.1f}", "kJ")
+    with col3:
+        custom_metric("CP (Relative)", f"{cp_w_kg:.2f}", "W/kg")
+    with col4:
+        custom_metric("W' (Relative)", f"{w_prime_j_kg:.1f}", "J/kg")
 
     st.markdown("---") # Visual separator
     
     col5, col6, col7 = st.columns(3)
-    col5.metric("Estimated LT1 (±9%)", f"{lt1_lower:.0f} - {lt1_upper:.0f} W")
-    col6.metric("Predicted VO₂max (abs)", f"{vo2max_l_min:.2f} L/min")
-    col7.metric("Predicted VO₂max (rel)", f"{vo2max_ml_kg_min:.1f} ml/min/kg")
+    with col5:
+        custom_metric("Estimated LT1 (±9%)", f"{lt1_lower:.0f} - {lt1_upper:.0f}", "W")
+    with col6:
+        custom_metric("Predicted VO₂max (abs)", f"{vo2max_l_min:.2f}", "L/min")
+    with col7:
+        custom_metric("Predicted VO₂max (rel)", f"{vo2max_ml_kg_min:.1f}", "ml/min/kg")
 
 
     # --- Power-Duration Curve ---
@@ -181,10 +241,13 @@ else:
             delta_cp = CP - prev_CP
             delta_w_prime_kj = W_prime_kj - prev_W_prime_kj
             
-            # Use st.metric's delta feature for visualization
+            # Use custom metric for visualization
             comp_col1, comp_col2 = st.columns(2)
-            comp_col1.metric("Critical Power (CP)", f"{CP:.0f} W", f"{delta_cp:+.0f} W")
-            comp_col2.metric("W' (Work Capacity)", f"{W_prime_kj:.1f} kJ", f"{delta_w_prime_kj:+.1f} kJ")
+            with comp_col1:
+                custom_metric("Critical Power (CP)", f"{CP:.0f}", "W", delta=delta_cp, delta_unit=" W")
+            with comp_col2:
+                custom_metric("W' (Work Capacity)", f"{W_prime_kj:.1f}", "kJ", delta=delta_w_prime_kj, delta_unit=" kJ")
+
         elif prev_p3 > 0 and prev_p12 > 0 and prev_p3 <= prev_p12:
             st.warning("Previous 3-min power must be greater than previous 12-min power for a valid comparison.")
 
@@ -196,5 +259,5 @@ else:
         duration_input_sec = duration_input_min * 60
         msp = (W_prime / duration_input_sec) + CP
         
-        st.metric(f"Predicted Max Power for {duration_input_min} minutes", f"{msp:.0f} W")
+        custom_metric(f"Predicted Max Power for {duration_input_min} minutes", f"{msp:.0f}", "W")
 
