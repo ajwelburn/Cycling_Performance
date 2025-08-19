@@ -163,18 +163,27 @@ else:
 
     # --- Comparison Section ---
     with st.expander("Compare To Previous Results"):
-        prev_cp = st.number_input("Enter Previous CP (W)", value=0.0, step=0.1, key="prev_cp")
-        prev_w_prime_kj = st.number_input("Enter Previous W' (kJ)", value=0.0, step=0.1, key="prev_w_prime")
+        st.write("Enter your previous test results to see the change.")
+        prev_p3 = st.number_input("Previous 3-Min Power (W)", value=0, step=1, key="prev_p3")
+        prev_p12 = st.number_input("Previous 12-Min Power (W)", value=0, step=1, key="prev_p12")
 
-        if prev_cp > 0 and prev_w_prime_kj > 0:
+        if prev_p3 > 0 and prev_p12 > 0 and prev_p3 > prev_p12:
+            # Recalculate previous CP and W'
+            prev_W_prime = (prev_p3 - prev_p12) / (inv_t1 - inv_t2)
+            prev_CP = prev_p12 - (prev_W_prime * inv_t2)
+            prev_W_prime_kj = prev_W_prime / 1000
+
             st.subheader("Comparison")
-            delta_cp = CP - prev_cp
-            delta_w_prime_kj = W_prime_kj - prev_w_prime_kj
+            delta_cp = CP - prev_CP
+            delta_w_prime_kj = W_prime_kj - prev_W_prime_kj
             
             # Use st.metric's delta feature for visualization
             comp_col1, comp_col2 = st.columns(2)
             comp_col1.metric("Critical Power (CP)", f"{CP:.0f} W", f"{delta_cp:+.0f} W")
             comp_col2.metric("W' (Work Capacity)", f"{W_prime_kj:.1f} kJ", f"{delta_w_prime_kj:+.1f} kJ")
+        elif prev_p3 > 0 and prev_p12 > 0 and prev_p3 <= prev_p12:
+            st.warning("Previous 3-min power must be greater than previous 12-min power for a valid comparison.")
+
 
     # --- Maximal Sustainable Power Calculator ---
     with st.expander("Calculate Maximal Sustainable Power for a Custom Duration"):
@@ -184,3 +193,4 @@ else:
         msp = (W_prime / duration_input_sec) + CP
         
         st.metric(f"Predicted Max Power for {duration_input_min} minutes", f"{msp:.0f} W")
+
