@@ -66,13 +66,24 @@ else:
     # Create the plot with Plotly
     fig = go.Figure()
 
-    # Add the main power curve
+    # Add the CP line first (for shading reference)
+    fig.add_trace(go.Scatter(
+        x=time_curve,
+        y=[CP] * len(time_curve),
+        mode='lines',
+        name='Critical Power (CP)',
+        line=dict(color='grey', dash='dot', width=2)
+    ))
+
+    # Add the main power curve with shading
     fig.add_trace(go.Scatter(
         x=time_curve, 
         y=power_curve, 
         mode='lines', 
         name='Power-Duration Curve',
-        line=dict(color='#007ACC', width=3)
+        line=dict(color='#007ACC', width=3),
+        fill='tonexty', # Shade the area down to the next trace (the CP line)
+        fillcolor='rgba(255, 182, 193, 0.3)' # Light pink with transparency
     ))
 
     # Add markers for the input powers
@@ -91,13 +102,15 @@ else:
         marker=dict(color='#33C1FF', size=10, symbol='circle')
     ))
 
-    # Update layout for a modern look
+    # Update layout for a modern look and set axis ranges
     fig.update_layout(
         title="Power-Duration Curve",
         xaxis_title="Time (s)",
         yaxis_title="Power (W)",
         legend_title="Legend",
-        template="plotly_white" # Use a clean template
+        template="plotly_white", # Use a clean template
+        xaxis_range=[0, max(time_curve) + 50], # Start x-axis at 0
+        yaxis_range=[0, max(power_curve) + 50]  # Start y-axis at 0
     )
 
     st.plotly_chart(fig, use_container_width=True)
