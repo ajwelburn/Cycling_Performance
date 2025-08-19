@@ -171,19 +171,25 @@ else:
 
     # Update layout for a modern look and set axis ranges
     fig_pd.update_layout(
-        title="Power-Duration Curve",
+        title="", # Remove title from here to place it outside
         xaxis_title="Time (s)",
         yaxis_title="Power (W)",
-        legend_title="Legend",
-        template="plotly_white", # Use a clean template
+        template="simple_white", # Use a clean template that removes top/right axes
         xaxis_range=[0, max(time_curve) + 50], # Start x-axis at 0
         yaxis_range=[100, max(power_curve) + 50],  # Start y-axis at 100
-        font=dict(color="black") # Set all font to black
+        font=dict(color="black", family="Arial, sans-serif"), # Set all font to black and sans-serif
+        legend=dict(
+            yanchor="top",
+            y=0.98,
+            xanchor="right",
+            x=0.98,
+            bgcolor="rgba(255,255,255,0.6)" # Semi-transparent background for legend
+        )
     )
     
-    # Add solid axis lines, inside ticks, and remove gridlines for a cleaner look
-    fig_pd.update_xaxes(showline=True, linewidth=2, linecolor='black', ticks='inside', showgrid=False)
-    fig_pd.update_yaxes(showline=True, linewidth=2, linecolor='black', ticks='inside', showgrid=False)
+    # Add solid axis lines and inside ticks
+    fig_pd.update_xaxes(showline=True, linewidth=1, linecolor='black', ticks='inside')
+    fig_pd.update_yaxes(showline=True, linewidth=1, linecolor='black', ticks='inside')
 
     st.plotly_chart(fig_pd, use_container_width=True)
     
@@ -260,4 +266,3 @@ else:
         msp = (W_prime / duration_input_sec) + CP
         
         custom_metric(f"Predicted Max Power for {duration_input_min} minutes", f"{msp:.0f}", "W")
-
