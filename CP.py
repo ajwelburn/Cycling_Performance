@@ -59,8 +59,8 @@ else:
     # --- Power-Duration Curve ---
     st.header("📊 Your Power-Duration Curve")
     
-    # Generate time data from 10s to 900s
-    time_curve = np.arange(10, 901)
+    # Generate time data from 20s to 900s
+    time_curve = np.arange(20, 901)
     power_curve = (W_prime / time_curve) + CP
 
     # Create the plot with Plotly
@@ -102,6 +102,21 @@ else:
         marker=dict(color='#33C1FF', size=10, symbol='circle')
     ))
 
+    # Add W' annotation in the shaded area
+    # Position it in the middle of the time axis, and halfway between CP and the curve
+    annotation_x = time_curve[len(time_curve) // 2]
+    annotation_y = (power_curve[len(power_curve) // 2] + CP) / 2
+    fig.add_annotation(
+        x=annotation_x,
+        y=annotation_y,
+        text="<b>W'</b>",
+        showarrow=False,
+        font=dict(
+            size=20,
+            color="#E32636" # A darker pink/red for visibility
+        )
+    )
+
     # Update layout for a modern look and set axis ranges
     fig.update_layout(
         title="Power-Duration Curve",
@@ -110,8 +125,13 @@ else:
         legend_title="Legend",
         template="plotly_white", # Use a clean template
         xaxis_range=[0, max(time_curve) + 50], # Start x-axis at 0
-        yaxis_range=[0, max(power_curve) + 50]  # Start y-axis at 0
+        yaxis_range=[100, max(power_curve) + 50]  # Start y-axis at 100
     )
+    
+    # Add solid axis lines for a cleaner look
+    fig.update_xaxes(showline=True, linewidth=2, linecolor='black')
+    fig.update_yaxes(showline=True, linewidth=2, linecolor='black')
+
 
     st.plotly_chart(fig, use_container_width=True)
     
