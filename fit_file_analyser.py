@@ -49,6 +49,8 @@ for i in range(reps):
         power.append(P1)
 
     # Recovery phase
+    # Wexp is the value at the end of the work phase. This is the key value.
+    Wexp_start_recovery = Wexp 
     for t in range(recovery):
         P2 = recovery_power
         DCP = CP - P2
@@ -58,22 +60,25 @@ for i in range(reps):
         else:
             Tau = A * (DCP ** B)
         
-        # Calculate new W'bal during recovery
-        Wbal = WP - (Wexp * m.exp(-(t+1) / Tau))
+        # This formula correctly models mono-exponential recovery over time 't'
+        Wbal = WP - (Wexp_start_recovery * m.exp(-(t+1) / Tau))
         Wbal = min(WP, Wbal) # W'bal cannot exceed W'P
         
-        Wexp = WP - Wbal
+        # The line that was here before (Wexp = WP - Wbal) was the error. It's been removed.
+        
         time.append(end_time + duration + t)
         W_bal.append(Wbal)
         power.append(P2)
-
+    
+    # Update Wexp based on the final Wbal at the end of the recovery period
+    Wexp = WP - Wbal
     end_time = (i + 1) * (duration + recovery)
 
 # --- Display Results ---
 
 # Check if data was generated before trying to plot or display
 if time:
-    # 1. Display the plot
+    # Display the plot
     st.header("W'bal vs. Time")
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(time, W_bal)
@@ -85,13 +90,5 @@ if time:
     ax.hlines(0, 0, max(time), colors='grey', linestyles='--')
     st.pyplot(fig)
 
-    # 2. Display the data in a table
-    st.header("Output Data")
-    df = pd.DataFrame({
-        'Time (s)': time,
-        'Power (W)': power,
-        'W′bal (J)': W_bal
-    })
-    st.dataframe(df)
 else:
     st.warning("No data generated. Increase the number of reps to at least 1.")
