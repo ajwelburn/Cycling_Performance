@@ -17,16 +17,19 @@ weight = st.sidebar.number_input("Weight (kg)", min_value=40.0, max_value=150.0,
 if p3 <= p12:
     st.error("Error: 3-minute power must be greater than 12-minute power. Please check your inputs.")
 else:
-    # Calculate CP and W'
+    # Calculate CP and W' using the Power vs. 1/Time linear model
     # Time in seconds
     t1 = 180  # 3 minutes
     t2 = 720  # 12 minutes
     
-    work1 = p3 * t1
-    work2 = p12 * t2
+    inv_t1 = 1 / t1
+    inv_t2 = 1 / t2
     
-    CP = (work2 - work1) / (t2 - t1)
-    W_prime = (p3 - CP) * t1
+    # W' is the slope of the Power vs. 1/Time relationship
+    W_prime = (p3 - p12) / (inv_t1 - inv_t2)
+    
+    # CP is the y-intercept of the Power vs. 1/Time relationship
+    CP = p12 - (W_prime * inv_t2)
     
     # Calculate derived metrics
     W_prime_kj = W_prime / 1000
@@ -120,23 +123,23 @@ else:
 
     st.plotly_chart(fig_pd, use_container_width=True)
     
-    # --- Linear Work vs. Time Graph ---
-    with st.expander("Show Linear Model (Work vs. Time)"):
+    # --- Linear Power vs. 1/Time Graph ---
+    with st.expander("Show Linear Model (Power vs. 1/Time)"):
         fig_linear = go.Figure()
 
         # Add the two test points
         fig_linear.add_trace(go.Scatter(
-            x=[t1, t2],
-            y=[work1, work2],
+            x=[inv_t1, inv_t2],
+            y=[p3, p12],
             mode='markers',
             name='Test Efforts',
             marker=dict(color='red', size=10)
         ))
 
         # Add the line connecting the points and extending to the y-axis
-        # The line is y = CP*x + W'
-        x_vals = np.array([0, t2])
-        y_vals = CP * x_vals + W_prime
+        # The line is P = W'*(1/t) + CP
+        x_vals = np.array([0, inv_t1])
+        y_vals = W_prime * x_vals + CP
         fig_linear.add_trace(go.Scatter(
             x=x_vals,
             y=y_vals,
@@ -146,9 +149,9 @@ else:
         ))
         
         fig_linear.update_layout(
-            title="Linear Model: Work vs. Time",
-            xaxis_title="Time (s)",
-            yaxis_title="Work (Joules)",
+            title="Linear Model: Power vs. 1/Time",
+            xaxis_title="1 / Time (s⁻¹)",
+            yaxis_title="Power (W)",
             template="plotly_white",
             font=dict(color="black")
         )
@@ -156,13 +159,12 @@ else:
         fig_linear.update_yaxes(showline=True, linewidth=2, linecolor='black', ticks='inside', showgrid=False)
         
         st.plotly_chart(fig_linear, use_container_width=True)
-        st.markdown(f"The slope of the line is your **Critical Power ({CP:.1f} W)**, and the y-intercept is your **W' ({W_prime_kj:.1f} kJ)**.")
+        st.markdown(f"The slope of the line is your **W' ({W_prime_kj:.1f} kJ)**, and the y-intercept is your **Critical Power ({CP:.1f} W)**.")
 
     # --- Comparison Section ---
     with st.expander("Compare To Previous Results"):
-        st.subheader("Enter Previous Values")
-        prev_cp = st.number_input("Previous CP (W)", value=0, step=1)
-        prev_w_prime_kj = st.number_input("Previous W' (kJ)", value=0.0, step=0.1)
+        prev_cp = st.number_input("Enter Previous CP (W)", value=0.0, step=0.1, key="prev_cp")
+        prev_w_prime_kj = st.number_input("Enter Previous W' (kJ)", value=0.0, step=0.1, key="prev_w_prime")
 
         if prev_cp > 0 and prev_w_prime_kj > 0:
             st.subheader("Comparison")
@@ -171,8 +173,8 @@ else:
             
             # Use st.metric's delta feature for visualization
             comp_col1, comp_col2 = st.columns(2)
-            comp_col1.metric("Critical Power (CP)", f"{CP:.0f} W", f"{delta_cp:.0f} W")
-            comp_col2.metric("W' (Work Capacity)", f"{W_prime_kj:.1f} kJ", f"{delta_w_prime_kj:.1f} kJ")
+            comp_col1.metric("Critical Power (CP)", f"{CP:.0f} W", f"{delta_cp:+.0f} W")
+            comp_col2.metric("W' (Work Capacity)", f"{W_prime_kj:.1f} kJ", f"{delta_w_prime_kj:+.1f} kJ")
 
     # --- Maximal Sustainable Power Calculator ---
     with st.expander("Calculate Maximal Sustainable Power for a Custom Duration"):
