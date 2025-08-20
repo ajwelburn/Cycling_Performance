@@ -52,11 +52,9 @@ def run_wbal_simulation(model_type, custom_A=None, custom_B=None):
     negative_wbal_detected = False
     suggested_duration = None
     suggested_recovery = None
-    prev_Wexp_start_recovery = 0
     depletion_time = None
 
     for i in range(reps):
-        Wbal_start_work = Wbal
         for t in range(duration):
             P1 = work_power
             expenditure = P1 - CP
@@ -66,22 +64,28 @@ def run_wbal_simulation(model_type, custom_A=None, custom_B=None):
             if Wbal < 0 and not negative_wbal_detected:
                 negative_wbal_detected = True
                 depletion_time = t + end_time # Record time of depletion
+                
+                # --- Steady-State Suggestion Calculations ---
                 expenditure_rate = work_power - CP
                 if expenditure_rate > 0:
-                    suggested_duration = m.floor(Wbal_start_work / expenditure_rate)
-                
-                Wbal_needed_for_work = (work_power - CP) * duration
-                DCP_prev = CP - recovery_power
-                if DCP_prev > 0 and prev_Wexp_start_recovery > 0 and Wbal_needed_for_work < WP:
-                    # Calculate Tau for the previous interval for the suggestion
-                    if model_type == 'BART': Tau_prev = 2287.2 * (DCP_prev ** -0.688)
-                    elif model_type == 'REG': Tau_prev = 5184 * (DCP_prev ** -0.70)
-                    elif model_type == 'Skiba2': Tau_prev = WP / DCP_prev
-                    else: Tau_prev = custom_A * (DCP_prev ** custom_B)
-                    
-                    log_arg = (WP - Wbal_needed_for_work) / prev_Wexp_start_recovery
-                    if log_arg > 0:
-                        suggested_recovery = m.ceil(-Tau_prev * m.log(log_arg))
+                    DCP = CP - recovery_power
+                    if DCP > 0:
+                        # Determine Tau for the given model
+                        if model_type == 'BART': tau = 2287.2 * (DCP ** -0.688)
+                        elif model_type == 'REG': tau = 5184 * (DCP ** -0.70)
+                        elif model_type == 'Skiba2': tau = WP / DCP
+                        else: tau = custom_A * (DCP ** custom_B)
+
+                        # Suggest new work duration based on current recovery
+                        E_max = WP * (1 - m.exp(-recovery / tau))
+                        suggested_duration = m.floor(E_max / expenditure_rate)
+
+                        # Suggest new recovery duration based on current work
+                        E = expenditure_rate * duration
+                        if E < WP: # Check if a single interval is possible
+                           log_arg = 1 - (E / WP)
+                           if log_arg > 0:
+                               suggested_recovery = m.ceil(-tau * m.log(log_arg))
             
             Wexp = WP - Wbal
             time.append(t + end_time)
@@ -108,7 +112,6 @@ def run_wbal_simulation(model_type, custom_A=None, custom_B=None):
             power.append(P2)
         
         Wexp = WP - Wbal
-        prev_Wexp_start_recovery = Wexp_start_recovery
         end_time = (i + 1) * (duration + recovery)
         
     return time, W_bal, power, negative_wbal_detected, suggested_duration, suggested_recovery, depletion_time
@@ -128,12 +131,12 @@ if main_negative:
         if main_sugg_dur is not None and main_sugg_dur > 0:
             st.info(f"**Option 1: Adjust Work Duration**\n\nReduce to **{main_sugg_dur} seconds**.")
         else:
-            st.warning("**Option 1: Adjust Work Duration**\n\nCannot be calculated.")
+            st.warning("**Option 1: Adjust Work Duration**\n\nCannot be calculated. The recovery may be too short for any meaningful work.")
     with col2:
         if main_sugg_rec is not None and main_sugg_rec > 0:
             st.info(f"**Option 2: Adjust Recovery Duration**\n\nIncrease to **{main_sugg_rec} seconds**.")
         else:
-            st.warning("**Option 2: Adjust Recovery Duration**\n\nCannot be calculated.")
+            st.warning("**Option 2: Adjust Recovery Duration**\n\nCannot be calculated. The work interval may be too demanding (requires more than 100% of W').")
 
 if main_time:
     # --- W'bal Graph ---
