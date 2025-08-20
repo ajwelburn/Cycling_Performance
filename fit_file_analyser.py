@@ -152,7 +152,7 @@ if main_time:
     ax.set_ylabel("W'bal (kJ)", fontsize=12)
     ax.set_title("W'bal vs Time", fontsize=14, fontweight='bold')
     ax.grid(True, linestyle='--', alpha=0.6)
-    ax.hlines(WP / 1000, 0, max(main_time), colors='grey', linestyles='--', label="W' Prime")
+    ax.hlines(WP / 1000, 0, max(main_time), colors='grey', linestyles='--', label="W'")
     ax.hlines(0, 0, max(main_time), colors='red', linestyles='--', label='Depletion (0 kJ)')
     min_wbal_kj = min(main_W_bal) / 1000
     max_wbal_kj = WP / 1000
@@ -198,7 +198,7 @@ if main_time:
     ax_comp.set_ylabel("W'bal (kJ)", fontsize=12)
     ax_comp.set_title("W'bal Model Comparison", fontsize=14, fontweight='bold')
     ax_comp.grid(True, linestyle='--', alpha=0.6)
-    ax_comp.hlines(WP / 1000, 0, max(main_time), colors='grey', linestyles='--', label="W' Prime")
+    ax_comp.hlines(WP / 1000, 0, max(main_time), colors='grey', linestyles='--', label="W' ")
     ax_comp.hlines(0, 0, max(main_time), colors='red', linestyles='--', label='Depletion (0 kJ)')
     ax_comp.legend()
     st.pyplot(fig_comp)
