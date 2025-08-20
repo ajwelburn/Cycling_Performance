@@ -34,60 +34,137 @@ W_bal = []
 power = []
 end_time = 0
 
+# Variables for suggestions
+negative_wbal_detected = False
+suggested_duration = None
+suggested_recovery = None
+prev_Wexp_start_recovery = 0 # Store the W'exp at the start of the previous recovery
+
 for i in range(reps):
-    # Work phase
+    # --- Work phase ---
+    Wbal_start_work = Wbal # W'bal at the beginning of the work interval
+    
     for t in range(duration):
         P1 = work_power
-        # W'bal cannot go below zero
         expenditure = P1 - CP
-        if expenditure > 0:
-            Wbal = max(0, Wbal - expenditure)
         
+        # Allow Wbal to go negative for detection, but don't clamp it here yet
+        if expenditure > 0:
+            Wbal -= expenditure
+        
+        # Detect if W'bal goes negative for the first time
+        if Wbal < 0 and not negative_wbal_detected:
+            negative_wbal_detected = True
+            
+            # --- Suggestion 1: Adjust Work Interval Duration ---
+            # Calculate the max duration possible with the starting W'bal
+            expenditure_rate = work_power - CP
+            if expenditure_rate > 0:
+                # Floor the result to get a whole number of seconds that is safe
+                suggested_duration = m.floor(Wbal_start_work / expenditure_rate)
+
+            # --- Suggestion 2: Adjust Recovery Interval Duration ---
+            # Calculate the recovery time needed in the *previous* interval
+            # to avoid depletion in the *current* interval.
+            Wbal_needed_for_work = (work_power - CP) * duration
+            DCP_prev = CP - recovery_power
+            
+            if DCP_prev > 0 and prev_Wexp_start_recovery > 0 and Wbal_needed_for_work < WP:
+                Tau_prev = A * (DCP_prev ** B)
+                # Argument for the natural logarithm
+                log_arg = (WP - Wbal_needed_for_work) / prev_Wexp_start_recovery
+                if log_arg > 0:
+                    # Ceil the result to ensure full recovery
+                    suggested_recovery = m.ceil(-Tau_prev * m.log(log_arg))
+
         Wexp = WP - Wbal
         time.append(t + end_time)
         W_bal.append(Wbal)
         power.append(P1)
 
-    # Recovery phase
-    # Wexp is the value at the end of the work phase. This is the key value.
-    Wexp_start_recovery = Wexp 
+    # --- Recovery phase ---
+    Wexp_start_recovery = Wexp
+    
     for t in range(recovery):
         P2 = recovery_power
         DCP = CP - P2
-        # Avoid math errors if recovery power is at or above CP
+        
         if DCP <= 0:
             Tau = float('inf') # Effectively no recovery
         else:
             Tau = A * (DCP ** B)
         
-        # This formula correctly models mono-exponential recovery over time 't'
-        Wbal = WP - (Wexp_start_recovery * m.exp(-(t+1) / Tau))
+        # Mono-exponential recovery model
+        Wbal = WP - (Wexp_start_recovery * m.exp(-(t + 1) / Tau))
         Wbal = min(WP, Wbal) # W'bal cannot exceed W'P
-        
-        # The line that was here before (Wexp = WP - Wbal) was the error. It's been removed.
         
         time.append(end_time + duration + t)
         W_bal.append(Wbal)
         power.append(P2)
     
-    # Update Wexp based on the final Wbal at the end of the recovery period
+    # Update Wexp and store the starting W'exp for the next loop's suggestion calculation
     Wexp = WP - Wbal
+    prev_Wexp_start_recovery = Wexp_start_recovery
     end_time = (i + 1) * (duration + recovery)
 
 # --- Display Results ---
 
-# Check if data was generated before trying to plot or display
+# Display pop-up message if W'bal went negative
+if negative_wbal_detected:
+    st.error("⚠️ W'bal Depleted!")
+    st.markdown(
+        "Your W' balance dropped below zero, which is not physiologically possible. "
+        "This indicates the work interval is too long or intense for the given recovery."
+    )
+    st.markdown("**Here are some suggestions to make the session sustainable:**")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if suggested_duration is not None and suggested_duration > 0:
+            st.info(f"**Option 1: Adjust Work Duration**\n\n"
+                    f"Reduce the work interval duration to **{suggested_duration} seconds**.")
+        else:
+            st.warning("**Option 1: Adjust Work Duration**\n\n"
+                       "Cannot be calculated. The work power might be too high "
+                       "or the starting W'bal was already zero.")
+    with col2:
+        if suggested_recovery is not None and suggested_recovery > 0:
+            st.info(f"**Option 2: Adjust Recovery Duration**\n\n"
+                    f"Increase the recovery interval duration to **{suggested_recovery} seconds**.")
+        else:
+            st.warning("**Option 2: Adjust Recovery Duration**\n\n"
+                       "Cannot be calculated. The required W'bal might be higher than W' Prime, "
+                       "or recovery from the previous interval was not possible.")
+
+
+# Check if data was generated before trying to plot
 if time:
     # Display the plot
     st.header("W'bal vs. Time")
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(time, W_bal)
-    ax.set_xlabel('Time (s)')
-    ax.set_ylabel("W'bal (J)")
-    ax.set_title("W'bal vs Time")
-    ax.grid(True)
-    ax.hlines(WP, 0, max(time), colors='grey', linestyles='--')
-    ax.hlines(0, 0, max(time), colors='grey', linestyles='--')
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Plot the W'bal line
+    ax.plot(time, np.array(W_bal) / 1000, label="W'bal", color='dodgerblue', linewidth=2)
+    
+    # Shade the area under the curve
+    ax.fill_between(time, np.array(W_bal) / 1000, color='dodgerblue', alpha=0.2)
+    
+    # Formatting
+    ax.set_xlabel('Time (s)', fontsize=12)
+    ax.set_ylabel("W'bal (kJ)", fontsize=12)
+    ax.set_title("W'bal vs Time", fontsize=14, fontweight='bold')
+    ax.grid(True, linestyle='--', alpha=0.6)
+    
+    # Add horizontal lines for WP and zero, extending to the max time
+    ax.hlines(WP / 1000, 0, max(time), colors='grey', linestyles='--', label="W' Prime")
+    ax.hlines(0, 0, max(time), colors='red', linestyles='--', label='Depletion (0 kJ)')
+    
+    # Set y-axis limits to ensure visibility below zero
+    min_wbal_kj = min(W_bal) / 1000
+    max_wbal_kj = WP / 1000
+    ax.set_ylim(min(min_wbal_kj * 1.1, -1), max_wbal_kj * 1.1)
+    
+    ax.legend()
     st.pyplot(fig)
 
 else:
