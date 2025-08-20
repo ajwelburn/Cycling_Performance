@@ -9,7 +9,7 @@ from plotly.subplots import make_subplots
 import io
 from streamlit_folium import st_folium
 
-# --- Caching Functions to Prevent Re-running ---
+# --- Caching Functions to Prevent Re-running, this was a pain, actually nearly though the oc out the window.  ---
 
 @st.cache_data
 def parse_fit_file(file_content: bytes) -> pd.DataFrame:
@@ -88,16 +88,12 @@ def create_profile_chart(df: pd.DataFrame):
     """Creates an interactive Plotly chart for elevation and CP decline."""
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     
-    # --- Y-AXIS AND FILL FIX ---
-    # Dynamically set the y-axis range to frame the elevation profile.
     min_elevation = df['Elevation_m'].min()
     max_elevation = df['Elevation_m'].max()
     elevation_range = max_elevation - min_elevation
     elevation_axis_bottom = min_elevation * 0.95 
     elevation_axis_top = max_elevation + (elevation_range * 0.2)
     
-    # Add an INVISIBLE trace at the bottom of the axis to define the fill area.
-    # This prevents an error caused by filling to zero when the axis doesn't start at zero.
     fig.add_trace(go.Scatter(
         x=df['Distance_km'],
         y=[elevation_axis_bottom] * len(df),
@@ -106,15 +102,13 @@ def create_profile_chart(df: pd.DataFrame):
         hoverinfo='none'
     ), secondary_y=False)
     
-    # Add the VISIBLE elevation trace, now filling to the invisible line above ('tonexty').
     fig.add_trace(go.Scatter(
         x=df['Distance_km'], y=df['Elevation_m'], name='Elevation (m)',
-        fill='tonexty', # This is the crucial fix.
+        fill='tonexty',
         line_color='#00bfff',
         hovertemplate='<b>Elevation</b>: %{y:.0f} m<extra></extra>'
     ), secondary_y=False)
 
-    # Add the CP Decline trace
     fig.add_trace(go.Scatter(
         x=df['Distance_km'], y=df['CP_Decline_Percent'], name='CP Decline (%)',
         line_color='#ff4500',
@@ -164,39 +158,56 @@ def create_power_hr_chart(df: pd.DataFrame):
     return fig
 
 def create_sea_level_equivalent_power_chart(df: pd.DataFrame):
-    """Creates an overlaid chart showing the difference between actual and sea-level power."""
-    fig = go.Figure()
+    """Creates a dual-axis chart for Sea-Level Equivalent Power and Power Gain."""
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
 
-    # Add the 'Actual Power' line
-    fig.add_trace(go.Scatter(
-        x=df['Distance_km'],
-        y=df['Power_W_Smoothed'],
-        name='Actual Power (Smoothed)',
-        line=dict(color='royalblue', width=2.5),
-        hovertemplate='<b>Actual</b>: %{y:.0f} W<extra></extra>'
-    ))
+    # Define modern, sleek colors
+    main_power_color = "#08F7FE"  # Electric Cyan
+    gain_color = "#FFAF42"       # Soft Gold
 
-    # Add the 'Sea-Level Equivalent' line and fill the area between them
+    # --- Primary Trace: Sea-Level Equivalent Power ---
     fig.add_trace(go.Scatter(
         x=df['Distance_km'],
         y=df['Sea_Level_Equivalent_Power_W_Smoothed'],
         name='Sea-Level Equivalent Power',
-        line=dict(color='#00ff96', width=2.5),
-        fill='tonexty',
-        fillcolor='rgba(0, 255, 150, 0.2)',
-        hovertemplate='<b>Equivalent</b>: %{y:.0f} W<br><b>Gain</b>: +%{customdata:.0f} W<extra></extra>',
-        customdata=df['Power_Gain_W_Smoothed']
-    ))
-    
+        line=dict(color=main_power_color, width=2.5),
+        fill='tozeroy',
+        fillcolor='rgba(8, 247, 254, 0.2)',
+        hovertemplate='<b>Equivalent Power</b>: %{y:.0f} W<extra></extra>'
+    ), secondary_y=False)
+
+    # --- Secondary Trace: Power Gain ---
+    fig.add_trace(go.Scatter(
+        x=df['Distance_km'],
+        y=df['Power_Gain_W_Smoothed'],
+        name='Power Gain',
+        line=dict(color=gain_color, width=2.5, dash='dash'),
+        hovertemplate='<b>Gain</b>: +%{y:.0f} W<extra></extra>'
+    ), secondary_y=True)
+
     fig.update_layout(
-        title_text='<b>Actual vs. Sea-Level Equivalent Power (Altitude Gain)</b>',
+        title_text='<b>Sea-Level Power & Altitude Gain</b>',
         template='plotly_dark',
         hovermode='x unified',
-        yaxis_title='Power (W)',
-        xaxis_title='Distance (km)',
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
+
+    # --- Update Y-Axes ---
+    fig.update_yaxes(
+        title_text="<b>Sea-Level Equivalent Power (W)</b>",
+        color=main_power_color,
+        secondary_y=False
+    )
+    fig.update_yaxes(
+        title_text="<b>Power Gain (W)</b>",
+        color=gain_color,
+        secondary_y=True,
+        showgrid=False # Hide grid lines for the secondary axis for a cleaner look
+    )
+    fig.update_xaxes(title_text="Distance (km)")
+
     return fig
+
 
 # --- Streamlit App UI ---
 
