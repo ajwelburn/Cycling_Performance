@@ -1,7 +1,15 @@
+Of course. I've integrated all the suggested improvements directly into the full application script.
+
+This final version includes the Workout Export, the Summary Table, and the UI refinements for a more complete and polished experience.
+
+The Final, Upgraded Script
+Python
+
 import streamlit as st
 import plotly.graph_objects as go
 import numpy as np
 import math as m
+import pandas as pd
 
 st.set_page_config(layout="wide", page_title="W'bal Simulator")
 
@@ -16,6 +24,7 @@ if 'num_efforts' not in st.session_state:
 # ==============================================================================
 
 def calculate_tau(model_type, DCP, W_prime_joules, custom_A, custom_B):
+    """Calculates the time constant for W' reconstitution."""
     if DCP <= 0: return float('inf')
     if model_type == 'BART': return 2287.2 * (DCP ** -0.688)
     elif model_type == 'REG': return 5184 * (DCP ** -0.70)
@@ -23,6 +32,7 @@ def calculate_tau(model_type, DCP, W_prime_joules, custom_A, custom_B):
     else: return custom_A * (DCP ** custom_B)
 
 def run_wbal_simulation(workout_structure, CP, W_prime_joules, tau_model, tau_A, tau_B):
+    """Runs the W'bal simulation based on a structured workout plan."""
     Wbal = W_prime_joules
     time, W_bal_data, power_profile = [0], [W_prime_joules], []
     
@@ -62,11 +72,32 @@ def run_wbal_simulation(workout_structure, CP, W_prime_joules, tau_model, tau_A,
 
     return time, W_bal_data, list(power_profile_interp), negative_wbal_detected, depletion_time
 
+def generate_zwo_file(workout_structure, workout_name, cp):
+    """Generates the XML content for a .zwo file for Zwift."""
+    xml = f'<workout_file>\n'
+    xml += f'  <author>W_bal_App</author>\n'
+    xml += f'  <name>{workout_name}</name>\n'
+    xml += f'  <description>Workout designed with the W_bal Streamlit App.</description>\n'
+    xml += f'  <sportType>bike</sportType>\n'
+    xml += f'  <workout>\n'
+
+    for segment in workout_structure:
+        duration = segment['duration']
+        power_watts = segment['power']
+        power_ftp_pc = round(power_watts / cp, 2)
+        # Zwift uses SteadyState for both work and recovery
+        xml += f'    <SteadyState Duration="{duration}" Power="{power_ftp_pc}" />\n'
+
+    xml += f'  </workout>\n'
+    xml += f'</workout_file>\n'
+    return xml
+
 # ==============================================================================
 # --- Charting Functions ---
 # ==============================================================================
 
 def create_wbal_chart(time, W_bal_data, W_prime_kj):
+    """Creates a sleek, interactive Plotly chart for W' balance."""
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=time, y=np.array(W_bal_data) / 1000,
@@ -82,24 +113,25 @@ def create_wbal_chart(time, W_bal_data, W_prime_kj):
     return fig
 
 def create_power_chart(time, power_profile, CP, depletion_time):
+    """Creates a Plotly chart for the power profile, highlighting efforts above CP."""
     fig = go.Figure()
 
+    # Base power profile (filled area)
     fig.add_trace(go.Scatter(
         x=time, y=power_profile,
-        fill='tozeroy', mode='lines', line_color='grey', name='Power < CP',
+        fill='tozeroy', mode='lines', line_color='grey', name='Power ≤ CP',
         fillcolor='rgba(128, 128, 128, 0.2)'
     ))
 
+    # Highlight segments above CP
     above_cp_indices = np.where(np.array(power_profile) > CP)[0]
     if len(above_cp_indices) > 0:
-        # Create segments for continuous chunks above CP
         segments = np.split(above_cp_indices, np.where(np.diff(above_cp_indices) != 1)[0] + 1)
         for segment in segments:
             if len(segment) > 0:
                 start, end = segment[0], segment[-1]
-                # Extend segment by one point to connect lines properly
-                segment_x = time[start:end+2]
-                segment_y = power_profile[start:end+2]
+                segment_x = time[start:end+2] if end + 1 < len(time) else time[start:]
+                segment_y = power_profile[start:end+2] if end + 1 < len(power_profile) else power_profile[start:]
                 fig.add_trace(go.Scatter(
                     x=segment_x, y=segment_y,
                     mode='lines', line_color='#FFAF42', name='Power > CP',
@@ -127,14 +159,14 @@ CP = st.sidebar.number_input("Critical Power (CP)", 100, 500, 300, 1)
 W_prime_kj = st.sidebar.number_input("W' (kJ)", 10.0, 50.0, 20.0, 0.5, format="%.1f")
 W_prime_joules = W_prime_kj * 1000
 
-st.sidebar.header("Advanced Tau Model")
-tau_option = st.sidebar.selectbox("Select Tau Model", ("Custom", "BART", "REG", "Skiba2"),
-    help="Tau (τ) represents the time constant of W' reconstitution. A lower Tau means faster recovery.")
-if tau_option == "Custom":
-    A = st.sidebar.slider("Tau Constant (A)", 1000, 10000, 5184)
-    B = st.sidebar.slider("Tau Exponent (B)", -1.0, -0.1, -0.60, 0.01)
-else:
-    A, B = 5184, -0.60
+with st.sidebar.expander("Advanced Tau Model"):
+    tau_option = st.selectbox("Select Tau Model", ("Custom", "BART", "REG", "Skiba2"),
+        help="Tau (τ) represents the time constant of W' reconstitution. A lower Tau means faster recovery.")
+    if tau_option == "Custom":
+        A = st.slider("Tau Constant (A)", 1000, 10000, 5184)
+        B = st.slider("Tau Exponent (B)", -1.0, -0.1, -0.60, 0.01)
+    else:
+        A, B = 5184, -0.60
     
 st.sidebar.caption("💡 Press 'Enter' after changing values to update the simulation.")
 
@@ -170,6 +202,12 @@ with designer_tab:
                     percent_cp = st.number_input(f"Power (% CP) [{i+1}]", 0, value=120, key=f"pcp_{i}")
                     power = CP * (percent_cp / 100)
                 efforts.append({'type': 'work', 'power': power, 'duration': duration})
+    
+    # Sanity-check warning for efforts below CP
+    for effort in efforts:
+        if effort['power'] <= CP:
+            st.warning(f"Warning: An effort is set to {effort['power']:.0f}W, which is at or below your CP of {CP}W. This will not deplete W'.")
+            break
 
     st.subheader("Step 2: Define Repetitions and Sets")
     reps_per_set = st.number_input("Repetitions per Set", 1, value=5)
@@ -221,8 +259,43 @@ with analysis_tab:
         
         st.divider()
 
+        st.subheader("Workout Structure Overview")
+        summary_data = []
+        for i, segment in enumerate(workout_structure):
+            step_type = "Effort" if segment['type'] == 'work' else "Recovery"
+            summary_data.append({
+                "Step": i + 1, "Action": step_type, "Duration (s)": segment['duration'],
+                "Power (W)": f"{segment['power']:.0f}", "Power (% CP)": f"{segment['power'] / CP * 100:.0f}%"
+            })
+        st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
+        st.divider()
+
+        st.subheader("Export Workout")
+        workout_name = st.text_input("Enter a name for your workout file:", "Wbal_Designed_Workout")
+        if workout_name:
+            zwo_content = generate_zwo_file(workout_structure, workout_name, CP)
+            st.download_button(
+                label="📥 Download .zwo for Zwift", data=zwo_content,
+                file_name=f"{workout_name}.zwo", mime="application/xml"
+            )
+        st.divider()
+
         if main_time and len(main_time) > 1:
             st.plotly_chart(create_wbal_chart(main_time, main_W_bal, W_prime_kj), use_container_width=True)
             st.plotly_chart(create_power_chart(main_time[1:], main_power, CP, depletion_time), use_container_width=True)
         else:
             st.warning("Simulation did not produce data to plot. Check your workout structure.")
+
+
+
+
+
+
+
+
+
+
+
+Tools
+
+
