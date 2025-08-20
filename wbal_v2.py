@@ -58,7 +58,7 @@ def run_wbal_simulation(workout_structure, CP, WP, tau_model, tau_A, tau_B, powe
                 if Wbal < 0 and not negative_wbal_detected:
                     negative_wbal_detected = True
                     # Calculate the exact time to depletion
-                    time_to_deplete = (W_bal[-2] / expenditure_rate)
+                    time_to_deplete = (W_bal[-2] / expenditure_rate) if expenditure_rate > 0 else 0
                     depletion_time = total_time + time_to_deplete
         
         else:  # W' is being reconstituted
@@ -76,8 +76,8 @@ def run_wbal_simulation(workout_structure, CP, WP, tau_model, tau_A, tau_B, powe
         total_time += segment_duration
 
     # Ensure power_profile aligns with time axis (excluding time=0)
-    if len(power_profile) != len(time) -1:
-         power_profile = np.interp(np.arange(1, total_time + 1), time[1:], power_profile)
+    if total_time > 0 and len(power_profile) > 0:
+        power_profile = np.interp(np.arange(1, total_time + 1), time[1:], power_profile)
 
     return time, W_bal, list(power_profile), negative_wbal_detected, depletion_time
 
@@ -117,7 +117,7 @@ with designer_tab:
 
     # --- Step 1: Define the Efforts within a Block ---
     st.subheader("Step 1: Define the Efforts within a Block")
-    st.session_state.num_efforts = st.number_input("How many different efforts in one block?", min_value=1, max_value=10, step=1)
+    st.session_state.num_efforts = st.number_input("How many different efforts per block?", min_value=1, max_value=10, step=1)
     
     efforts = []
     cols = st.columns(st.session_state.num_efforts)
@@ -135,15 +135,15 @@ with designer_tab:
 
     # --- Step 2: Define Repetitions and Recovery ---
     st.subheader("Step 2: Define Repetitions & Recovery")
-    reps_in_block = st.number_input("How many times to repeat this block of efforts?", min_value=1, value=5)
+    reps_in_block = st.number_input("How many times to repeat this block?", min_value=1, value=5)
     
-    rec_unit = st.radio("Recovery Power Unit", ["Watts", "% of CP"], key="rec_unit")
+    rec_unit = st.radio("Block Recovery Power Unit", ["Watts", "% of CP"], key="rec_unit")
     if rec_unit == "Watts":
-        recovery_power = st.number_input("Recovery Power (W)", min_value=0, value=200)
+        recovery_power = st.number_input("Block Recovery Power (W)", min_value=0, value=200)
     else:
-        rec_percent_cp = st.number_input("Recovery Power (% CP)", min_value=0, value=60)
+        rec_percent_cp = st.number_input("Block Recovery Power (% CP)", min_value=0, value=60)
         recovery_power = CP * (rec_percent_cp / 100)
-    recovery_duration = st.number_input("Recovery Duration between efforts (s)", min_value=0, value=180)
+    recovery_duration = st.number_input("Block Recovery Duration (s)", min_value=0, value=180)
 
     # --- Step 3: Structure as Sets (Optional) ---
     st.subheader("Step 3: Structure as Sets (Optional)")
@@ -165,15 +165,15 @@ with designer_tab:
     # --- Generate the final workout structure ---
     for s in range(num_sets):
         for r in range(reps_in_block):
-            for i, effort in enumerate(efforts):
+            # Add the entire block of efforts back-to-back
+            for effort in efforts:
                 workout_structure.append(effort)
-                # Add recovery after each effort EXCEPT the last one in the block
-                if i < len(efforts) - 1:
-                    workout_structure.append({'type': 'recovery', 'power': recovery_power, 'duration': recovery_duration})
-            # Add recovery after the block of efforts, EXCEPT the last block in the set
+            
+            # Add recovery between blocks, but not after the last block in a set
             if r < reps_in_block - 1:
-                 workout_structure.append({'type': 'recovery', 'power': recovery_power, 'duration': recovery_duration})
-        # Add recovery between sets, EXCEPT after the final set
+                workout_structure.append({'type': 'recovery', 'power': recovery_power, 'duration': recovery_duration})
+        
+        # Add recovery between sets, but not after the final set
         if s < num_sets - 1:
             workout_structure.append({'type': 'recovery', 'power': set_recovery_power, 'duration': set_recovery_duration})
     
@@ -197,36 +197,45 @@ with analysis_tab:
             st.success("✅ W'bal was not depleted during this session.")
 
         # --- W'bal Graph ---
-        st.subheader("W' Balance vs. Time")
-        fig, ax = plt.subplots(figsize=(12, 6))
-        
-        # Plot 5% lower scenario first (background)
-        ax.plot(scen_time, np.array(scen_W_bal) / 1000, color='gray', linewidth=2.5, alpha=0.8, linestyle='--', label="W'bal (at 95% intensity)")
-        ax.fill_between(scen_time, np.array(scen_W_bal) / 1000, color='gray', alpha=0.1)
+        if main_time and len(main_time) > 1:
+            st.subheader("W' Balance vs. Time")
+            fig, ax = plt.subplots(figsize=(12, 6))
+            
+            # Plot 5% lower scenario first (background)
+            ax.plot(scen_time, np.array(scen_W_bal) / 1000, color='gray', linewidth=2.5, alpha=0.8, linestyle='--', label="W'bal (at 95% intensity)")
+            ax.fill_between(scen_time, np.array(scen_W_bal) / 1000, color='gray', alpha=0.1)
 
-        # Plot main simulation
-        ax.plot(main_time, np.array(main_W_bal) / 1000, color='dodgerblue', linewidth=2.5, label="W'bal (at 100% intensity)")
-        ax.fill_between(main_time, np.array(main_W_bal) / 1000, color='dodgerblue', alpha=0.2)
-        
-        ax.set_xlabel('Time (s)', fontsize=12)
-        ax.set_ylabel("W'bal (kJ)", fontsize=12)
-        ax.grid(True, linestyle='--', alpha=0.6)
-        ax.hlines(WP / 1000, 0, max(main_time), colors='grey', linestyles='--', label="W'")
-        ax.hlines(0, 0, max(main_time), colors='red', linestyles='--', label='Depletion (0 kJ)')
-        min_wbal_kj = min(main_W_bal) / 1000
-        max_wbal_kj = WP / 1000
-        ax.set_ylim(min(min_wbal_kj * 1.1, -1), max_wbal_kj * 1.1)
-        ax.legend()
-        st.pyplot(fig)
+            # Plot main simulation
+            ax.plot(main_time, np.array(main_W_bal) / 1000, color='dodgerblue', linewidth=2.5, label="W'bal (at 100% intensity)")
+            ax.fill_between(main_time, np.array(main_W_bal) / 1000, color='dodgerblue', alpha=0.2)
+            
+            ax.set_xlabel('Time (s)', fontsize=12)
+            ax.set_ylabel("W'bal (kJ)", fontsize=12)
+            ax.grid(True, linestyle='--', alpha=0.6)
+            ax.hlines(WP / 1000, 0, max(main_time), colors='grey', linestyles='--', label="W'")
+            ax.hlines(0, 0, max(main_time), colors='red', linestyles='--', label='Depletion (0 kJ)')
+            min_wbal_kj = min(main_W_bal) / 1000 if main_W_bal else 0
+            max_wbal_kj = WP / 1000
+            ax.set_ylim(min(min_wbal_kj * 1.1, -1), max_wbal_kj * 1.1)
+            ax.legend()
+            st.pyplot(fig)
 
-        # --- Power Graph ---
-        st.subheader("Power Profile vs. Time")
-        fig_pow, ax_pow = plt.subplots(figsize=(12, 6))
-        ax_pow.plot(main_time[1:], main_power, label="Power", color='coral', linewidth=2)
-        ax_pow.set_xlabel('Time (s)', fontsize=12)
-        ax_pow.set_ylabel("Power (W)", fontsize=12)
-        ax_pow.grid(True, linestyle='--', alpha=0.6)
-        if depletion_time is not None:
-            ax_pow.axvspan(depletion_time, max(main_time), color='red', alpha=0.2, label='Post-Depletion')
-        ax_pow.legend()
-        st.pyplot(fig_pow)
+            # --- Power Graph ---
+            st.subheader("Power Profile vs. Time")
+            fig_pow, ax_pow = plt.subplots(figsize=(12, 6))
+            ax_pow.plot(main_time[1:], main_power, label="Power", color='coral', linewidth=2)
+            ax_pow.set_xlabel('Time (s)', fontsize=12)
+            ax_pow.set_ylabel("Power (W)", fontsize=12)
+            ax_pow.grid(True, linestyle='--', alpha=0.6)
+            if depletion_time is not None:
+                ax_pow.axvspan(depletion_time, max(main_time), color='red', alpha=0.2, label='Post-Depletion')
+            ax_pow.legend()
+            st.pyplot(fig_pow)
+        else:
+            st.warning("Simulation did not produce data to plot. Please check your workout structure (e.g., ensure durations are > 0).")
+
+
+
+
+
+
