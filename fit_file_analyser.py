@@ -7,6 +7,10 @@ import pandas as pd
 # --- App Title ---
 st.title("W'bal Model Calculator")
 st.markdown("Adjust the parameters in the sidebar to model W' balance over repeated intervals.")
+st.markdown("""
+<small>Based on research by: Welburn, A.J., Pugh, C.F., Bailey, S.J. et al. W′ reconstitution modelling during intermittent exercise performed to task failure. Eur J Appl Physiol (2025). <a href="https://doi.org/10.1007/s00421-025-05912-0" target="_blank">https://doi.org/10.1007/s00421-025-05912-0</a></small>
+""", unsafe_allow_html=True)
+
 
 # --- Sidebar for User Inputs ---
 st.sidebar.header("Model Inputs")
@@ -29,7 +33,7 @@ if tau_option == "Custom":
     A = st.sidebar.slider("Tau Constant (A)", 1000, 10000, 5184)
     B = st.sidebar.slider("Tau Exponent (B)", -1.0, -0.1, -0.60, step=0.01)
 else:
-    # Set default values for A and B when not in use, they won't be used in calculations
+    # Set default values for A and B when not in use
     A = 5184
     B = -0.60
 
@@ -37,17 +41,19 @@ else:
 def run_wbal_simulation(model_type, custom_A=None, custom_B=None):
     """
     Runs the W'bal simulation for a given model type.
-    Returns time, W_bal, and depletion information.
+    Returns time, W_bal, power, and depletion information.
     """
     Wbal = WP
     Wexp = 0
     time = []
     W_bal = []
+    power = []
     end_time = 0
     negative_wbal_detected = False
     suggested_duration = None
     suggested_recovery = None
     prev_Wexp_start_recovery = 0
+    depletion_time = None
 
     for i in range(reps):
         Wbal_start_work = Wbal
@@ -59,6 +65,7 @@ def run_wbal_simulation(model_type, custom_A=None, custom_B=None):
             
             if Wbal < 0 and not negative_wbal_detected:
                 negative_wbal_detected = True
+                depletion_time = t + end_time # Record time of depletion
                 expenditure_rate = work_power - CP
                 if expenditure_rate > 0:
                     suggested_duration = m.floor(Wbal_start_work / expenditure_rate)
@@ -66,14 +73,11 @@ def run_wbal_simulation(model_type, custom_A=None, custom_B=None):
                 Wbal_needed_for_work = (work_power - CP) * duration
                 DCP_prev = CP - recovery_power
                 if DCP_prev > 0 and prev_Wexp_start_recovery > 0 and Wbal_needed_for_work < WP:
-                    if model_type == 'BART':
-                        Tau_prev = 2287.2 * (DCP_prev ** -0.688)
-                    elif model_type == 'REG':
-                        Tau_prev = 5184 * (DCP_prev ** -0.70)
-                    elif model_type == 'Skiba2':
-                        Tau_prev = WP / DCP_prev
-                    else: # Custom
-                        Tau_prev = custom_A * (DCP_prev ** custom_B)
+                    # Calculate Tau for the previous interval for the suggestion
+                    if model_type == 'BART': Tau_prev = 2287.2 * (DCP_prev ** -0.688)
+                    elif model_type == 'REG': Tau_prev = 5184 * (DCP_prev ** -0.70)
+                    elif model_type == 'Skiba2': Tau_prev = WP / DCP_prev
+                    else: Tau_prev = custom_A * (DCP_prev ** custom_B)
                     
                     log_arg = (WP - Wbal_needed_for_work) / prev_Wexp_start_recovery
                     if log_arg > 0:
@@ -82,6 +86,7 @@ def run_wbal_simulation(model_type, custom_A=None, custom_B=None):
             Wexp = WP - Wbal
             time.append(t + end_time)
             W_bal.append(Wbal)
+            power.append(P1)
 
         Wexp_start_recovery = Wexp
         for t in range(recovery):
@@ -91,35 +96,32 @@ def run_wbal_simulation(model_type, custom_A=None, custom_B=None):
             if DCP <= 0:
                 Tau = float('inf')
             else:
-                if model_type == 'BART':
-                    Tau = 2287.2 * (DCP ** -0.688)
-                elif model_type == 'REG':
-                    Tau = 5184 * (DCP ** -0.70)
-                elif model_type == 'Skiba2':
-                    Tau = WP / DCP
-                else: # Custom
-                    Tau = custom_A * (DCP ** custom_B)
+                if model_type == 'BART': Tau = 2287.2 * (DCP ** -0.688)
+                elif model_type == 'REG': Tau = 5184 * (DCP ** -0.70)
+                elif model_type == 'Skiba2': Tau = WP / DCP
+                else: Tau = custom_A * (DCP ** custom_B)
             
             Wbal = WP - (Wexp_start_recovery * m.exp(-(t + 1) / Tau))
             Wbal = min(WP, Wbal)
             time.append(end_time + duration + t)
             W_bal.append(Wbal)
+            power.append(P2)
         
         Wexp = WP - Wbal
         prev_Wexp_start_recovery = Wexp_start_recovery
         end_time = (i + 1) * (duration + recovery)
         
-    return time, W_bal, negative_wbal_detected, suggested_duration, suggested_recovery
+    return time, W_bal, power, negative_wbal_detected, suggested_duration, suggested_recovery, depletion_time
 
 # --- Run Main Simulation for User's Selection ---
-main_time, main_W_bal, main_negative, main_sugg_dur, main_sugg_rec = run_wbal_simulation(tau_option, A, B)
+main_time, main_W_bal, main_power, main_negative, main_sugg_dur, main_sugg_rec, depletion_time = run_wbal_simulation(tau_option, A, B)
 
 # --- Display Main Results ---
 st.header(f"Results for: {tau_option} Model")
 
 if main_negative:
     st.error("⚠️ W'bal Depleted!")
-    st.markdown("Your W' balance dropped below zero, this suggest the session may not be possiable.")
+    st.markdown("Your W' balance dropped below zero. This indicates the prescribed session may not be possible.")
     st.markdown("**Here are some suggestions to make the session sustainable:**")
     col1, col2 = st.columns(2)
     with col1:
@@ -134,20 +136,39 @@ if main_negative:
             st.warning("**Option 2: Adjust Recovery Duration**\n\nCannot be calculated.")
 
 if main_time:
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(main_time, np.array(main_W_bal) / 1000, label="W'bal", color='dodgerblue', linewidth=2)
-    ax.fill_between(main_time, np.array(main_W_bal) / 1000, color='dodgerblue', alpha=0.2)
-    ax.set_xlabel('Time (s)', fontsize=12)
-    ax.set_ylabel("W'bal (kJ)", fontsize=12)
-    ax.set_title("W'bal vs Time", fontsize=14, fontweight='bold')
-    ax.grid(True, linestyle='--', alpha=0.6)
-    ax.hlines(WP / 1000, 0, max(main_time), colors='grey', linestyles='--', label="W' Prime")
-    ax.hlines(0, 0, max(main_time), colors='red', linestyles='--', label='Depletion (0 kJ)')
-    min_wbal_kj = min(main_W_bal) / 1000
-    max_wbal_kj = WP / 1000
-    ax.set_ylim(min(min_wbal_kj * 1.1, -1), max_wbal_kj * 1.1)
-    ax.legend()
-    st.pyplot(fig)
+    col1, col2 = st.columns(2)
+    with col1:
+        # --- W'bal Graph ---
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.plot(main_time, np.array(main_W_bal) / 1000, label="W'bal", color='dodgerblue', linewidth=2)
+        ax.fill_between(main_time, np.array(main_W_bal) / 1000, color='dodgerblue', alpha=0.2)
+        ax.set_xlabel('Time (s)', fontsize=12)
+        ax.set_ylabel("W'bal (kJ)", fontsize=12)
+        ax.set_title("W'bal vs Time", fontsize=14, fontweight='bold')
+        ax.grid(True, linestyle='--', alpha=0.6)
+        ax.hlines(WP / 1000, 0, max(main_time), colors='grey', linestyles='--', label="W' Prime")
+        ax.hlines(0, 0, max(main_time), colors='red', linestyles='--', label='Depletion (0 kJ)')
+        min_wbal_kj = min(main_W_bal) / 1000
+        max_wbal_kj = WP / 1000
+        ax.set_ylim(min(min_wbal_kj * 1.1, -1), max_wbal_kj * 1.1)
+        ax.legend()
+        st.pyplot(fig)
+
+    with col2:
+        # --- Power Graph ---
+        fig_pow, ax_pow = plt.subplots(figsize=(10, 6))
+        ax_pow.plot(main_time, main_power, label="Power", color='coral', linewidth=2)
+        ax_pow.set_xlabel('Time (s)', fontsize=12)
+        ax_pow.set_ylabel("Power (W)", fontsize=12)
+        ax_pow.set_title("Power vs Time", fontsize=14, fontweight='bold')
+        ax_pow.grid(True, linestyle='--', alpha=0.6)
+        
+        # Highlight area after depletion
+        if depletion_time is not None:
+            ax_pow.axvspan(depletion_time, max(main_time), color='red', alpha=0.2, label='Post-Depletion')
+        
+        ax_pow.legend()
+        st.pyplot(fig_pow)
 else:
     st.warning("No data generated. Increase the number of reps to at least 1.")
 
@@ -162,15 +183,14 @@ if main_time:
     colors = {'BART': 'orange', 'REG': 'green', 'Skiba2': 'purple', 'Custom': 'dodgerblue'}
 
     for model in models_to_compare:
-        # For the custom model, use the user's selected A and B
         if model == "Custom":
             comp_A, comp_B = A, B
             label = f"Custom (A={A}, B={B})" if tau_option == "Custom" else "Custom (User Selected)"
         else:
-            comp_A, comp_B = None, None # Not needed for preset models
+            comp_A, comp_B = None, None
             label = model
             
-        time_comp, W_bal_comp, _, _, _ = run_wbal_simulation(model, comp_A, comp_B)
+        time_comp, W_bal_comp, _, _, _, _, _ = run_wbal_simulation(model, comp_A, comp_B)
         
         if time_comp:
             ax_comp.plot(time_comp, np.array(W_bal_comp) / 1000, label=label, color=colors[model], linewidth=2)
