@@ -86,26 +86,39 @@ def create_folium_map(df: pd.DataFrame):
 def create_profile_chart(df: pd.DataFrame):
     """Creates an interactive Plotly chart for elevation and CP decline."""
     fig = make_subplots(specs=[[{"secondary_y": True}]])
+    
     fig.add_trace(go.Scatter(
         x=df['Distance_km'], y=df['Elevation_m'], name='Elevation (m)',
         fill='tozeroy', line_color='#00bfff',
         hovertemplate='<b>Elevation</b>: %{y:.0f} m<extra></extra>'
     ), secondary_y=False)
+
     fig.add_trace(go.Scatter(
         x=df['Distance_km'], y=df['CP_Decline_Percent'], name='CP Decline (%)',
         line_color='#ff4500',
         hovertemplate='<b>CP Decline</b>: %{y:.1f}%%<br><b>Adjusted CP</b>: %{customdata:.0f} W<extra></extra>',
         customdata=df['CP_Adjusted']
     ), secondary_y=True)
+
+    # Calculate a dynamic upper limit for the y-axis to add headroom
+    max_elevation = df['Elevation_m'].max()
+    elevation_axis_top = max_elevation * 1.3  # Add 30% headroom to accentuate changes
+    
     fig.update_layout(
         title_text='<b>Ride Profile: Elevation vs. Critical Power Decline</b>',
         template='plotly_dark',
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     fig.update_xaxes(title_text="Distance (km)")
-    fig.update_yaxes(title_text="<b>Elevation (m)</b>", color='#00bfff', secondary_y=False, rangemode='tozero')
+    fig.update_yaxes(
+        title_text="<b>Elevation (m)</b>", 
+        color='#00bfff', 
+        secondary_y=False, 
+        range=[0, elevation_axis_top]  # Set range from 0 to the new top
+    )
     fig.update_yaxes(title_text="<b>CP Decline (%)</b>", color='#ff4500', secondary_y=True)
     return fig
+
 
 def create_power_hr_chart(df: pd.DataFrame):
     """Creates a chart for Power and Heart Rate with a modern dark theme."""
