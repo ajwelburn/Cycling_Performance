@@ -15,16 +15,16 @@ if 'num_efforts' not in st.session_state:
 # --- Core Functions ---
 # ==============================================================================
 
-def calculate_tau(model_type, DCP, W_prime, custom_A, custom_B):
+def calculate_tau(model_type, DCP, W_prime_joules, custom_A, custom_B):
     if DCP <= 0: return float('inf')
     if model_type == 'BART': return 2287.2 * (DCP ** -0.688)
     elif model_type == 'REG': return 5184 * (DCP ** -0.70)
-    elif model_type == 'Skiba2': return W_prime / DCP
+    elif model_type == 'Skiba2': return W_prime_joules / DCP
     else: return custom_A * (DCP ** custom_B)
 
-def run_wbal_simulation(workout_structure, CP, W_prime, tau_model, tau_A, tau_B):
-    Wbal = W_prime
-    time, W_bal_data, power_profile = [0], [W_prime], []
+def run_wbal_simulation(workout_structure, CP, W_prime_joules, tau_model, tau_A, tau_B):
+    Wbal = W_prime_joules
+    time, W_bal_data, power_profile = [0], [W_prime_joules], []
     
     total_time = 0
     depletion_time = None
@@ -47,11 +47,11 @@ def run_wbal_simulation(workout_structure, CP, W_prime, tau_model, tau_A, tau_B)
                     depletion_time = total_time + time_to_deplete
         else:
             DCP = CP - power
-            tau = calculate_tau(tau_model, DCP, W_prime, tau_A, tau_B)
-            Wexp_start_recovery = W_prime - Wbal
+            tau = calculate_tau(tau_model, DCP, W_prime_joules, tau_A, tau_B)
+            Wexp_start_recovery = W_prime_joules - Wbal
             for t in range(1, segment_duration + 1):
-                Wbal = W_prime - (Wexp_start_recovery * m.exp(-t / tau)) if tau != float('inf') else Wbal
-                Wbal = min(W_prime, Wbal)
+                Wbal = W_prime_joules - (Wexp_start_recovery * m.exp(-t / tau)) if tau != float('inf') else Wbal
+                Wbal = min(W_prime_joules, Wbal)
                 time.append(total_time + t)
                 W_bal_data.append(Wbal)
                 power_profile.append(power)
@@ -66,13 +66,13 @@ def run_wbal_simulation(workout_structure, CP, W_prime, tau_model, tau_A, tau_B)
 # --- Charting Functions ---
 # ==============================================================================
 
-def create_wbal_chart(time, W_bal_data, W_prime):
+def create_wbal_chart(time, W_bal_data, W_prime_kj):
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=time, y=np.array(W_bal_data) / 1000,
         fill='tozeroy', mode='lines', line_color='#08F7FE', name="W'bal"
     ))
-    fig.add_hline(y=W_prime / 1000, line_dash="dash", line_color="grey", annotation_text="W'")
+    fig.add_hline(y=W_prime_kj, line_dash="dash", line_color="grey", annotation_text="W'")
     fig.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Depletion")
     fig.update_layout(
         title_text="<b>W' Balance vs. Time</b>", template='plotly_dark',
@@ -84,26 +84,27 @@ def create_wbal_chart(time, W_bal_data, W_prime):
 def create_power_chart(time, power_profile, CP, depletion_time):
     fig = go.Figure()
 
-    # Base power profile (filled area)
     fig.add_trace(go.Scatter(
         x=time, y=power_profile,
         fill='tozeroy', mode='lines', line_color='grey', name='Power < CP',
         fillcolor='rgba(128, 128, 128, 0.2)'
     ))
 
-    # Highlight segments above CP
     above_cp_indices = np.where(np.array(power_profile) > CP)[0]
-    start = -1
-    for i in range(len(above_cp_indices)):
-        if i == 0 or above_cp_indices[i] != above_cp_indices[i-1] + 1:
-            start = above_cp_indices[i]
-        if i == len(above_cp_indices) - 1 or above_cp_indices[i] != above_cp_indices[i+1] - 1:
-            end = above_cp_indices[i]
-            fig.add_trace(go.Scatter(
-                x=time[start:end+2], y=power_profile[start:end+1],
-                mode='lines', line_color='#FFAF42', name='Power > CP',
-                fill='tozeroy', fillcolor='rgba(255, 175, 66, 0.3)'
-            ))
+    if len(above_cp_indices) > 0:
+        # Create segments for continuous chunks above CP
+        segments = np.split(above_cp_indices, np.where(np.diff(above_cp_indices) != 1)[0] + 1)
+        for segment in segments:
+            if len(segment) > 0:
+                start, end = segment[0], segment[-1]
+                # Extend segment by one point to connect lines properly
+                segment_x = time[start:end+2]
+                segment_y = power_profile[start:end+2]
+                fig.add_trace(go.Scatter(
+                    x=segment_x, y=segment_y,
+                    mode='lines', line_color='#FFAF42', name='Power > CP',
+                    fill='tozeroy', fillcolor='rgba(255, 175, 66, 0.3)'
+                ))
 
     fig.add_hline(y=CP, line_dash="dash", line_color="white", annotation_text="CP")
     
@@ -123,15 +124,19 @@ def create_power_chart(time, power_profile, CP, depletion_time):
 
 st.sidebar.header("Athlete Parameters")
 CP = st.sidebar.number_input("Critical Power (CP)", 100, 500, 300, 1)
-W_prime = st.sidebar.number_input("W' (Joules)", 10000, 50000, 20000, 100)
+W_prime_kj = st.sidebar.number_input("W' (kJ)", 10.0, 50.0, 20.0, 0.5, format="%.1f")
+W_prime_joules = W_prime_kj * 1000
 
 st.sidebar.header("Advanced Tau Model")
-tau_option = st.sidebar.selectbox("Select Tau Model", ("Custom", "BART", "REG", "Skiba2"))
+tau_option = st.sidebar.selectbox("Select Tau Model", ("Custom", "BART", "REG", "Skiba2"),
+    help="Tau (τ) represents the time constant of W' reconstitution. A lower Tau means faster recovery.")
 if tau_option == "Custom":
     A = st.sidebar.slider("Tau Constant (A)", 1000, 10000, 5184)
     B = st.sidebar.slider("Tau Exponent (B)", -1.0, -0.1, -0.60, 0.01)
 else:
     A, B = 5184, -0.60
+    
+st.sidebar.caption("💡 Press 'Enter' after changing values to update the simulation.")
 
 # ==============================================================================
 # --- UI: Main App Layout ---
@@ -144,36 +149,36 @@ st.markdown("""
 
 designer_tab, analysis_tab = st.tabs(["Workout Designer", "Simulation & Analysis"])
 
-# --- Workout Designer Tab ---
 with designer_tab:
     st.header("Design Your Interval Session")
     workout_structure = []
 
-    st.subheader("Step 1: Define the Efforts within a single Block")
-    st.session_state.num_efforts = st.number_input("How many different efforts per block?", 1, 10, 1)
+    st.subheader("Step 1: Define the Efforts")
+    st.session_state.num_efforts = st.number_input("How many different back-to-back efforts?", 1, 10, 1)
     
     efforts = []
     cols = st.columns(st.session_state.num_efforts)
     for i in range(st.session_state.num_efforts):
         with cols[i]:
-            st.markdown(f"**Effort {i+1}**")
-            duration = st.number_input(f"Duration (s) [{i+1}]", 1, value=180, key=f"d_{i}")
-            unit = st.radio(f"Power Unit [{i+1}]", ["Watts", "% of CP"], key=f"u_{i}")
-            if unit == "Watts":
-                power = st.number_input(f"Power (W) [{i+1}]", 0, value=360, key=f"p_{i}")
-            else:
-                percent_cp = st.number_input(f"Power (% CP) [{i+1}]", 0, value=120, key=f"pcp_{i}")
-                power = CP * (percent_cp / 100)
-            efforts.append({'type': 'work', 'power': power, 'duration': duration})
+            with st.container(border=True):
+                st.markdown(f"**Effort {i+1}**")
+                duration = st.number_input(f"Duration (s) [{i+1}]", 1, value=180, key=f"d_{i}")
+                unit = st.radio(f"Power Unit [{i+1}]", ["Watts", "% of CP"], key=f"u_{i}", horizontal=True)
+                if unit == "Watts":
+                    power = st.number_input(f"Power (W) [{i+1}]", 0, value=360, key=f"p_{i}")
+                else:
+                    percent_cp = st.number_input(f"Power (% CP) [{i+1}]", 0, value=120, key=f"pcp_{i}")
+                    power = CP * (percent_cp / 100)
+                efforts.append({'type': 'work', 'power': power, 'duration': duration})
 
-    st.subheader("Step 2: Define Repetitions per Set")
-    reps_per_set = st.number_input("How many times to repeat the block of efforts?", 1, value=5)
-    
-    st.subheader("Step 3: Define Sets & Recovery")
-    num_sets = st.number_input("How many sets?", 1, value=1)
+    st.subheader("Step 2: Define Repetitions and Sets")
+    reps_per_set = st.number_input("Repetitions per Set", 1, value=5)
+    num_sets = st.number_input("Number of Sets", 1, value=1)
     
     if num_sets > 1:
-        set_rec_unit = st.radio("Power Unit between Sets", ["Watts", "% of CP"], key="set_rec_unit")
+        st.markdown("---")
+        st.markdown("##### Recovery Between Sets")
+        set_rec_unit = st.radio("Power Unit between Sets", ["Watts", "% of CP"], key="set_rec_unit", horizontal=True)
         if set_rec_unit == "Watts":
             set_recovery_power = st.number_input("Power between Sets (W)", 0, value=150)
         else:
@@ -189,18 +194,16 @@ with designer_tab:
         if s < num_sets - 1:
             workout_structure.append({'type': 'recovery', 'power': set_recovery_power, 'duration': set_recovery_duration})
     
-    st.success("Workout structure generated! Switch to the 'Simulation & Analysis' tab to see the results.")
+    st.success("Workout structure generated! Switch to the **Simulation & Analysis** tab to see the results.")
 
-# --- Analysis Tab ---
 with analysis_tab:
     if not workout_structure:
         st.warning("Please design a workout in the 'Workout Designer' tab first.")
     else:
-        main_time, main_W_bal, main_power, main_negative, depletion_time = run_wbal_simulation(workout_structure, CP, W_prime, tau_option, A, B)
+        main_time, main_W_bal, main_power, main_negative, depletion_time = run_wbal_simulation(workout_structure, CP, W_prime_joules, tau_option, A, B)
 
         st.header("Simulation Results")
         
-        # --- Summary Metrics ---
         total_duration_seconds = sum(s['duration'] for s in workout_structure)
         total_duration_minutes = total_duration_seconds / 60
         weighted_avg_power = sum(s['power'] * s['duration'] for s in workout_structure) / total_duration_seconds if total_duration_seconds > 0 else 0
@@ -218,10 +221,8 @@ with analysis_tab:
         
         st.divider()
 
-        # --- Charts ---
         if main_time and len(main_time) > 1:
-            st.plotly_chart(create_wbal_chart(main_time, main_W_bal, W_prime), use_container_width=True)
+            st.plotly_chart(create_wbal_chart(main_time, main_W_bal, W_prime_kj), use_container_width=True)
             st.plotly_chart(create_power_chart(main_time[1:], main_power, CP, depletion_time), use_container_width=True)
         else:
             st.warning("Simulation did not produce data to plot. Check your workout structure.")
-
