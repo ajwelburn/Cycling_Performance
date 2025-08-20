@@ -98,16 +98,17 @@ def create_profile_chart(df: pd.DataFrame):
         customdata=df['CP_Adjusted']
     ), secondary_y=True)
 
-    # Dynamically set the y-axis range to better showcase elevation changes.
+    # A more robust method to frame the elevation profile perfectly.
     min_elevation = df['Elevation_m'].min()
     max_elevation = df['Elevation_m'].max()
-    avg_elevation = df['Elevation_m'].mean()
     
     # Start the axis just below the ride's lowest point.
     elevation_axis_bottom = min_elevation * 0.95 
-    
-    # Set top of axis to double the average or just above the max, whichever is higher.
-    elevation_axis_top = max(max_elevation * 1.05, avg_elevation * 2) 
+
+    # Calculate the total elevation gain/loss range for the ride.
+    elevation_range = max_elevation - min_elevation
+    # Add 20% of this range as headroom above the max elevation.
+    elevation_axis_top = max_elevation + (elevation_range * 0.2)
     
     fig.update_layout(
         title_text='<b>Ride Profile: Elevation vs. Critical Power Decline</b>',
@@ -119,7 +120,7 @@ def create_profile_chart(df: pd.DataFrame):
         title_text="<b>Elevation (m)</b>", 
         color='#00bfff', 
         secondary_y=False, 
-        range=[elevation_axis_bottom, elevation_axis_top] # Set new dynamic range
+        range=[elevation_axis_bottom, elevation_axis_top] # Set final dynamic range
     )
     fig.update_yaxes(title_text="<b>CP Decline (%)</b>", color='#ff4500', secondary_y=True)
     return fig
