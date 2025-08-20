@@ -55,8 +55,6 @@ def perform_analysis(df: pd.DataFrame, sea_level_cp: float, smoothing_window: in
     
     # Calculate sea-level equivalent power if power data exists
     if 'Power_W' in df.columns and not df['Power_W'].dropna().empty:
-        # NEW LOGIC: Calculate what power at altitude would be equivalent to at sea level
-        # This value will be higher than the actual power recorded.
         df['Sea_Level_Equivalent_Power_W'] = (df['Power_W'] / df['Decline_Factor'])
         
         # Apply smoothing
@@ -70,7 +68,7 @@ def perform_analysis(df: pd.DataFrame, sea_level_cp: float, smoothing_window: in
 def create_folium_map(df: pd.DataFrame):
     """Creates the Folium map showing the ride route colored by CP difference."""
     start_location = [df["Latitude"].iloc[0], df["Longitude"].iloc[0]]
-    m = folium.Map(location=start_location, zoom_start=12, tiles="CartoDB dark_matter")
+    m = folium.Map(location=start_location, zoom_start=12, tiles="OpenStreetMap")
     min_diff, max_diff = df["CP_Diff_W"].min(), df["CP_Diff_W"].max()
     colormap = cm.LinearColormap(
         colors=["#d73027", "#fdae61", "#ffffbf", "#abdda4", "#2b83ba"],
@@ -100,9 +98,10 @@ def create_profile_chart(df: pd.DataFrame):
         customdata=df['CP_Adjusted']
     ), secondary_y=True)
 
-    # Calculate a dynamic upper limit for the y-axis to add headroom
+    # Set top of axis to double the average, but ensure max peak is never cut off
     max_elevation = df['Elevation_m'].max()
-    elevation_axis_top = max_elevation * 1.3  # Add 30% headroom to accentuate changes
+    avg_elevation = df['Elevation_m'].mean()
+    elevation_axis_top = max(max_elevation * 1.1, avg_elevation * 2) # Use whichever is higher
     
     fig.update_layout(
         title_text='<b>Ride Profile: Elevation vs. Critical Power Decline</b>',
@@ -114,11 +113,10 @@ def create_profile_chart(df: pd.DataFrame):
         title_text="<b>Elevation (m)</b>", 
         color='#00bfff', 
         secondary_y=False, 
-        range=[0, elevation_axis_top]  # Set range from 0 to the new top
+        range=[0, elevation_axis_top]  # Set range from 0 to the new dynamic top
     )
     fig.update_yaxes(title_text="<b>CP Decline (%)</b>", color='#ff4500', secondary_y=True)
     return fig
-
 
 def create_power_hr_chart(df: pd.DataFrame):
     """Creates a chart for Power and Heart Rate with a modern dark theme."""
@@ -147,25 +145,31 @@ def create_power_hr_chart(df: pd.DataFrame):
     return fig
 
 def create_sea_level_equivalent_power_chart(df: pd.DataFrame):
-    """Creates a chart comparing actual power with sea-level equivalent power."""
-    fig = go.Figure()
+    """Creates a stacked chart comparing actual vs. sea-level equivalent power with unified hover."""
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1)
+
     fig.add_trace(go.Scatter(
         x=df['Distance_km'], y=df['Power_W_Smoothed'], name='Actual Power (Smoothed)',
         line=dict(color='royalblue', width=2.5),
-        hovertemplate='<b>Actual (Smoothed)</b>: %{y:.0f} W<extra></extra>'
-    ))
+        hovertemplate='<b>Actual</b>: %{y:.0f} W<extra></extra>'
+    ), row=1, col=1)
+
     fig.add_trace(go.Scatter(
         x=df['Distance_km'], y=df['Sea_Level_Equivalent_Power_W_Smoothed'], name='Sea-Level Equivalent Power',
-        line=dict(color='#00ff96', width=2.5, dash='dash'),
-        hovertemplate='<b>Sea-Level Equivalent</b>: %{y:.0f} W<extra></extra>'
-    ))
+        line=dict(color='#00ff96', width=2.5),
+        hovertemplate='<b>Equivalent</b>: %{y:.0f} W<extra></extra>'
+    ), row=2, col=1)
+
     fig.update_layout(
-        title_text='<b>Actual Power vs. Sea-Level Equivalent Power</b>',
-        xaxis_title='Distance (km)',
-        yaxis_title='Power (W)',
+        title_text='<b>Power vs. Sea-Level Equivalent Power</b>',
         template='plotly_dark',
+        hovermode='x unified',
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
+    
+    fig.update_yaxes(title_text="Actual Power (W)", row=1, col=1)
+    fig.update_yaxes(title_text="Sea-Level Equiv. (W)", row=2, col=1)
+    fig.update_xaxes(title_text="Distance (km)", row=2, col=1)
     return fig
 
 # --- Streamlit App UI ---
