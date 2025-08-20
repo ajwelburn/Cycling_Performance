@@ -61,6 +61,9 @@ def perform_analysis(df: pd.DataFrame, sea_level_cp: float, smoothing_window: in
         df['Power_W_Smoothed'] = df['Power_W'].rolling(window=smoothing_window, min_periods=1, center=True).mean()
         df['Sea_Level_Equivalent_Power_W_Smoothed'] = df['Sea_Level_Equivalent_Power_W'].rolling(window=smoothing_window, min_periods=1, center=True).mean()
         
+        # Calculate the difference for the hover tooltip
+        df['Power_Gain_W_Smoothed'] = df['Sea_Level_Equivalent_Power_W_Smoothed'] - df['Power_W_Smoothed']
+        
     return df
 
 # --- Visualization Functions ---
@@ -98,139 +101,6 @@ def create_profile_chart(df: pd.DataFrame):
         customdata=df['CP_Adjusted']
     ), secondary_y=True)
 
-    # A more robust method to frame the elevation profile perfectly.
     min_elevation = df['Elevation_m'].min()
     max_elevation = df['Elevation_m'].max()
-    
-    # Start the axis just below the ride's lowest point.
-    elevation_axis_bottom = min_elevation * 0.95 
-
-    # Calculate the total elevation gain/loss range for the ride.
     elevation_range = max_elevation - min_elevation
-    # Add 20% of this range as headroom above the max elevation.
-    elevation_axis_top = max_elevation + (elevation_range * 0.2)
-    
-    fig.update_layout(
-        title_text='<b>Ride Profile: Elevation vs. Critical Power Decline</b>',
-        template='plotly_dark',
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
-    fig.update_xaxes(title_text="Distance (km)")
-    fig.update_yaxes(
-        title_text="<b>Elevation (m)</b>", 
-        color='#00bfff', 
-        secondary_y=False, 
-        range=[elevation_axis_bottom, elevation_axis_top] # Set final dynamic range
-    )
-    fig.update_yaxes(title_text="<b>CP Decline (%)</b>", color='#ff4500', secondary_y=True)
-    return fig
-
-def create_power_hr_chart(df: pd.DataFrame):
-    """Creates a chart for Power and Heart Rate with a modern dark theme."""
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-    if 'Power_W_Smoothed' in df.columns and not df['Power_W_Smoothed'].dropna().empty:
-        fig.add_trace(go.Scatter(
-            x=df['Distance_km'], y=df['Power_W_Smoothed'], name='Power (Smoothed)',
-            line_color='#ee72f1',
-            hovertemplate='<b>Smoothed Power</b>: %{y:.0f} W<br><b>Actual Power</b>: %{customdata:.0f} W<extra></extra>',
-            customdata=df['Power_W']
-        ), secondary_y=False)
-    if 'Heart_Rate_bpm' in df.columns and not df['Heart_Rate_bpm'].dropna().empty:
-        fig.add_trace(go.Scatter(
-            x=df['Distance_km'], y=df['Heart_Rate_bpm'], name='Heart Rate (bpm)',
-            line_color='#f5b342',
-            hovertemplate='<b>Heart Rate</b>: %{y:.0f} bpm<extra></extra>'
-        ), secondary_y=True)
-    fig.update_layout(
-        title_text='<b>Power and Heart Rate Profile</b>',
-        template='plotly_dark',
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
-    fig.update_xaxes(title_text="Distance (km)")
-    fig.update_yaxes(title_text="<b>Power (W)</b>", color='#ee72f1', secondary_y=False)
-    fig.update_yaxes(title_text="<b>Heart Rate (bpm)</b>", color='#f5b342', secondary_y=True, showgrid=False)
-    return fig
-
-def create_sea_level_equivalent_power_chart(df: pd.DataFrame):
-    """Creates a stacked chart comparing actual vs. sea-level equivalent power with unified hover."""
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1)
-
-    fig.add_trace(go.Scatter(
-        x=df['Distance_km'], y=df['Power_W_Smoothed'], name='Actual Power (Smoothed)',
-        line=dict(color='royalblue', width=2.5),
-        hovertemplate='<b>Actual</b>: %{y:.0f} W<extra></extra>'
-    ), row=1, col=1)
-
-    fig.add_trace(go.Scatter(
-        x=df['Distance_km'], y=df['Sea_Level_Equivalent_Power_W_Smoothed'], name='Sea-Level Equivalent Power',
-        line=dict(color='#00ff96', width=2.5),
-        hovertemplate='<b>Equivalent</b>: %{y:.0f} W<extra></extra>'
-    ), row=2, col=1)
-
-    fig.update_layout(
-        title_text='<b>Power vs. Sea-Level Equivalent Power</b>',
-        template='plotly_dark',
-        hovermode='x unified',
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
-    
-    fig.update_yaxes(title_text="Actual Power (W)", row=1, col=1)
-    fig.update_yaxes(title_text="Sea-Level Equiv. (W)", row=2, col=1)
-    fig.update_xaxes(title_text="Distance (km)", row=2, col=1)
-    return fig
-
-# --- Streamlit App UI ---
-
-st.set_page_config(layout="wide", page_title="Altitude Power Analyzer")
-st.title("🚴 Altitude Power Analyzer")
-
-st.sidebar.header("⚙️ Settings")
-sea_level_cp = st.sidebar.number_input(
-    "Enter your Sea-Level Critical Power (W)",
-    min_value=100, max_value=600, value=300, step=1
-)
-
-smoothing_window = st.sidebar.slider(
-    "Power Smoothing (seconds)",
-    min_value=1, max_value=60, value=30,
-    help="Adjust the window for the rolling average to smooth the power data. 1 = raw data."
-)
-
-uploaded_file = st.sidebar.file_uploader(
-    "Upload your .FIT file", type=["fit"]
-)
-
-if uploaded_file is not None:
-    with st.spinner("Analyzing your ride... This might take a moment."):
-        file_content = uploaded_file.getvalue()
-        raw_df = parse_fit_file(file_content)
-
-        if raw_df.empty:
-            st.error("Could not find valid GPS or altitude data in the FIT file. Please try another file.")
-        else:
-            analyzed_df = perform_analysis(raw_df.copy(), sea_level_cp, smoothing_window)
-            
-            st.success("✅ Analysis Complete!")
-
-            profile_fig = create_profile_chart(analyzed_df)
-            st.plotly_chart(profile_fig, use_container_width=True)
-
-            has_power = 'Power_W_Smoothed' in analyzed_df.columns and not analyzed_df['Power_W_Smoothed'].dropna().empty
-            has_hr = 'Heart_Rate_bpm' in analyzed_df.columns and not analyzed_df['Heart_Rate_bpm'].dropna().empty
-
-            if has_power or has_hr:
-                st.divider()
-                st.header("⚡️ Power & Heart Rate Analysis")
-                power_hr_fig = create_power_hr_chart(analyzed_df)
-                st.plotly_chart(power_hr_fig, use_container_width=True)
-            
-            if has_power:
-                equivalent_power_fig = create_sea_level_equivalent_power_chart(analyzed_df)
-                st.plotly_chart(equivalent_power_fig, use_container_width=True)
-
-            st.divider()
-            st.header("🗺️ Ride Map")
-            folium_map = create_folium_map(analyzed_df)
-            st_folium(folium_map, use_container_width=True, height=500)
-else:
-    st.info("👋 Welcome! Upload a .FIT file and set your CP in the sidebar to begin.")
