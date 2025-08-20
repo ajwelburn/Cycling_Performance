@@ -9,9 +9,6 @@ from plotly.subplots import make_subplots
 import io
 from streamlit_folium import st_folium
 
-# --- Core Functions (Copied directly from your Colab notebook) ---
-# These functions don't need any changes as they handle the data processing.
-
 def parse_fit_file(file_content: bytes) -> pd.DataFrame:
     """Parses the in-memory .fit file content into a pandas DataFrame."""
     records = []
@@ -95,12 +92,11 @@ def create_profile_chart(df: pd.DataFrame):
     fig.update_yaxes(title_text="<b>CP Decline (%)</b>", color='#d62728', secondary_y=True)
     return fig
 
-# --- Streamlit App UI ---
 
 st.set_page_config(layout="wide")
 st.title("🚴 Critical Power Altitude Analysis")
 
-# --- Sidebar for User Inputs ---
+
 st.sidebar.header("⚙️ Settings")
 sea_level_cp = st.sidebar.number_input(
     "Enter your Sea-Level Critical Power (W)",
@@ -115,7 +111,7 @@ uploaded_file = st.sidebar.file_uploader(
     type=["fit"]
 )
 
-# --- Main App Logic ---
+#stuff that it should do, sometimes it might note i'm winging this currently.
 if uploaded_file is not None:
     with st.spinner("Analyzing your ride... This might take a moment."):
         # Get file content
@@ -143,5 +139,5 @@ if uploaded_file is not None:
             st_folium(folium_map, use_container_width=True, height=500)
 
 else:
-    # Initial state when no file is uploaded
+    
     st.info("👋 Welcome! Please upload a .FIT file and set your CP in the sidebar to begin.")
