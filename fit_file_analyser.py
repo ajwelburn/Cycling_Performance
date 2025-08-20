@@ -67,7 +67,7 @@ with st.expander("Show Session Viability Analysis", expanded=True):
         st.warning("⚠️ This session may not be sustainable.")
         st.markdown("**Here are some suggestions to achieve a sustainable steady-state:**")
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             # Suggest new work duration
             sugg_dur = m.floor(E_max / expenditure_rate) if expenditure_rate > 0 else None
@@ -91,6 +91,10 @@ with st.expander("Show Session Viability Analysis", expanded=True):
         
         with col3:
             st.info(f"**Hint 3: Reduce Repetitions**\n\nConsider reducing the number of repetitions to complete the session before depletion.")
+        
+        with col4:
+            if tau_option == "Custom":
+                st.info("**Hint 4: Adjust Tau Factors**\n\n- **A (scaling factor):** Increase for slower recovery.\n- **B (rate of decay):** Make less negative (e.g., -0.6 -> -0.5) for slower recovery.")
 
     st.caption("Remember, the W'bal model is a powerful tool to help make better informed decisions about session structure, not the absolute determinant of exercise performance.")
 
