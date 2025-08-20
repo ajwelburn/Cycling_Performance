@@ -136,39 +136,36 @@ if main_negative:
             st.warning("**Option 2: Adjust Recovery Duration**\n\nCannot be calculated.")
 
 if main_time:
-    col1, col2 = st.columns(2)
-    with col1:
-        # --- W'bal Graph ---
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.plot(main_time, np.array(main_W_bal) / 1000, label="W'bal", color='dodgerblue', linewidth=2)
-        ax.fill_between(main_time, np.array(main_W_bal) / 1000, color='dodgerblue', alpha=0.2)
-        ax.set_xlabel('Time (s)', fontsize=12)
-        ax.set_ylabel("W'bal (kJ)", fontsize=12)
-        ax.set_title("W'bal vs Time", fontsize=14, fontweight='bold')
-        ax.grid(True, linestyle='--', alpha=0.6)
-        ax.hlines(WP / 1000, 0, max(main_time), colors='grey', linestyles='--', label="W' Prime")
-        ax.hlines(0, 0, max(main_time), colors='red', linestyles='--', label='Depletion (0 kJ)')
-        min_wbal_kj = min(main_W_bal) / 1000
-        max_wbal_kj = WP / 1000
-        ax.set_ylim(min(min_wbal_kj * 1.1, -1), max_wbal_kj * 1.1)
-        ax.legend()
-        st.pyplot(fig)
+    # --- W'bal Graph ---
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(main_time, np.array(main_W_bal) / 1000, label="W'bal", color='dodgerblue', linewidth=2)
+    ax.fill_between(main_time, np.array(main_W_bal) / 1000, color='dodgerblue', alpha=0.2)
+    ax.set_xlabel('Time (s)', fontsize=12)
+    ax.set_ylabel("W'bal (kJ)", fontsize=12)
+    ax.set_title("W'bal vs Time", fontsize=14, fontweight='bold')
+    ax.grid(True, linestyle='--', alpha=0.6)
+    ax.hlines(WP / 1000, 0, max(main_time), colors='grey', linestyles='--', label="W' Prime")
+    ax.hlines(0, 0, max(main_time), colors='red', linestyles='--', label='Depletion (0 kJ)')
+    min_wbal_kj = min(main_W_bal) / 1000
+    max_wbal_kj = WP / 1000
+    ax.set_ylim(min(min_wbal_kj * 1.1, -1), max_wbal_kj * 1.1)
+    ax.legend()
+    st.pyplot(fig)
 
-    with col2:
-        # --- Power Graph ---
-        fig_pow, ax_pow = plt.subplots(figsize=(10, 6))
-        ax_pow.plot(main_time, main_power, label="Power", color='coral', linewidth=2)
-        ax_pow.set_xlabel('Time (s)', fontsize=12)
-        ax_pow.set_ylabel("Power (W)", fontsize=12)
-        ax_pow.set_title("Power vs Time", fontsize=14, fontweight='bold')
-        ax_pow.grid(True, linestyle='--', alpha=0.6)
-        
-        # Highlight area after depletion
-        if depletion_time is not None:
-            ax_pow.axvspan(depletion_time, max(main_time), color='red', alpha=0.2, label='Post-Depletion')
-        
-        ax_pow.legend()
-        st.pyplot(fig_pow)
+    # --- Power Graph ---
+    fig_pow, ax_pow = plt.subplots(figsize=(10, 6))
+    ax_pow.plot(main_time, main_power, label="Power", color='coral', linewidth=2)
+    ax_pow.set_xlabel('Time (s)', fontsize=12)
+    ax_pow.set_ylabel("Power (W)", fontsize=12)
+    ax_pow.set_title("Power vs Time", fontsize=14, fontweight='bold')
+    ax_pow.grid(True, linestyle='--', alpha=0.6)
+    
+    # Highlight area after depletion
+    if depletion_time is not None:
+        ax_pow.axvspan(depletion_time, max(main_time), color='red', alpha=0.2, label='Post-Depletion')
+    
+    ax_pow.legend()
+    st.pyplot(fig_pow)
 else:
     st.warning("No data generated. Increase the number of reps to at least 1.")
 
