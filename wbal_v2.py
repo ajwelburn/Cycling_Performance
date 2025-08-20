@@ -1,9 +1,4 @@
-Of course. I've integrated all the suggested improvements directly into the full application script.
 
-This final version includes the Workout Export, the Summary Table, and the UI refinements for a more complete and polished experience.
-
-The Final, Upgraded Script
-Python
 
 import streamlit as st
 import plotly.graph_objects as go
