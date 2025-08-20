@@ -15,16 +15,18 @@ if 'num_efforts' not in st.session_state:
 # --- Core Functions ---
 # ==============================================================================
 
-def calculate_tau(model_type, DCP, W_prime_joules, custom_A, custom_B):
+def calculate_tau(model_type, DCP, WP, custom_A, custom_B):
+    """Calculates the time constant for W' reconstitution."""
     if DCP <= 0: return float('inf')
     if model_type == 'BART': return 2287.2 * (DCP ** -0.688)
     elif model_type == 'REG': return 5184 * (DCP ** -0.70)
-    elif model_type == 'Skiba2': return W_prime_joules / DCP
+    elif model_type == 'Skiba2': return WP / DCP
     else: return custom_A * (DCP ** custom_B)
 
-def run_wbal_simulation(workout_structure, CP, W_prime_joules, tau_model, tau_A, tau_B):
-    Wbal = W_prime_joules
-    time, W_bal_data, power_profile = [0], [W_prime_joules], []
+def run_wbal_simulation(workout_structure, CP, WP, tau_model, tau_A, tau_B):
+    """Runs the W'bal simulation based on a structured workout plan."""
+    Wbal = WP
+    time, W_bal_data, power_profile = [0], [WP], []
     
     total_time = 0
     depletion_time = None
@@ -47,11 +49,11 @@ def run_wbal_simulation(workout_structure, CP, W_prime_joules, tau_model, tau_A,
                     depletion_time = total_time + time_to_deplete
         else:
             DCP = CP - power
-            tau = calculate_tau(tau_model, DCP, W_prime_joules, tau_A, tau_B)
-            Wexp_start_recovery = W_prime_joules - Wbal
+            tau = calculate_tau(tau_model, DCP, WP, tau_A, tau_B)
+            Wexp_start_recovery = WP - Wbal
             for t in range(1, segment_duration + 1):
-                Wbal = W_prime_joules - (Wexp_start_recovery * m.exp(-t / tau)) if tau != float('inf') else Wbal
-                Wbal = min(W_prime_joules, Wbal)
+                Wbal = WP - (Wexp_start_recovery * m.exp(-t / tau)) if tau != float('inf') else Wbal
+                Wbal = min(WP, Wbal)
                 time.append(total_time + t)
                 W_bal_data.append(Wbal)
                 power_profile.append(power)
@@ -67,6 +69,7 @@ def run_wbal_simulation(workout_structure, CP, W_prime_joules, tau_model, tau_A,
 # ==============================================================================
 
 def create_wbal_chart(time, W_bal_data, W_prime_kj):
+    """Creates a sleek, interactive Plotly chart for W' balance."""
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=time, y=np.array(W_bal_data) / 1000,
@@ -77,19 +80,22 @@ def create_wbal_chart(time, W_bal_data, W_prime_kj):
     fig.update_layout(
         title_text="<b>W' Balance vs. Time</b>", template='plotly_dark',
         xaxis_title="Time (s)", yaxis_title="W'bal (kJ)",
-        height=500
+        height=500, margin=dict(l=20, r=20, t=40, b=20)
     )
     return fig
 
 def create_power_chart(time, power_profile, CP, depletion_time):
+    """Creates a Plotly chart for the power profile, highlighting efforts above CP."""
     fig = go.Figure()
 
+    # Base power profile (filled area)
     fig.add_trace(go.Scatter(
         x=time, y=power_profile,
-        fill='tozeroy', mode='lines', line_color='grey', name='Power < CP',
+        fill='tozeroy', mode='lines', line_color='grey', name='Power ≤ CP',
         fillcolor='rgba(128, 128, 128, 0.2)'
     ))
 
+    # Highlight segments above CP
     above_cp_indices = np.where(np.array(power_profile) > CP)[0]
     if len(above_cp_indices) > 0:
         # Create segments for continuous chunks above CP
@@ -97,9 +103,8 @@ def create_power_chart(time, power_profile, CP, depletion_time):
         for segment in segments:
             if len(segment) > 0:
                 start, end = segment[0], segment[-1]
-                # Extend segment by one point to connect lines properly
-                segment_x = time[start:end+2]
-                segment_y = power_profile[start:end+2]
+                segment_x = time[start:end+2] if end + 1 < len(time) else time[start:]
+                segment_y = power_profile[start:end+2] if end + 1 < len(power_profile) else power_profile[start:]
                 fig.add_trace(go.Scatter(
                     x=segment_x, y=segment_y,
                     mode='lines', line_color='#FFAF42', name='Power > CP',
@@ -114,7 +119,7 @@ def create_power_chart(time, power_profile, CP, depletion_time):
     fig.update_layout(
         title_text="<b>Power Profile vs. Time</b>", template='plotly_dark',
         xaxis_title="Time (s)", yaxis_title="Power (W)",
-        height=500, showlegend=False
+        height=500, showlegend=False, margin=dict(l=20, r=20, t=40, b=20)
     )
     return fig
 
@@ -127,14 +132,14 @@ CP = st.sidebar.number_input("Critical Power (CP)", 100, 500, 300, 1)
 W_prime_kj = st.sidebar.number_input("W' (kJ)", 10.0, 50.0, 20.0, 0.5, format="%.1f")
 W_prime_joules = W_prime_kj * 1000
 
-st.sidebar.header("Advanced Tau Model")
-tau_option = st.sidebar.selectbox("Select Tau Model", ("Custom", "BART", "REG", "Skiba2"),
-    help="Tau (τ) represents the time constant of W' reconstitution. A lower Tau means faster recovery.")
-if tau_option == "Custom":
-    A = st.sidebar.slider("Tau Constant (A)", 1000, 10000, 5184)
-    B = st.sidebar.slider("Tau Exponent (B)", -1.0, -0.1, -0.60, 0.01)
-else:
-    A, B = 5184, -0.60
+with st.sidebar.expander("Advanced Tau Model"):
+    tau_option = st.selectbox("Select Tau Model", ("Custom", "BART", "REG", "Skiba2"),
+        help="Tau (τ) represents the time constant of W' reconstitution. A lower Tau means faster recovery.")
+    if tau_option == "Custom":
+        A = st.slider("Tau Constant (A)", 1000, 10000, 5184)
+        B = st.slider("Tau Exponent (B)", -1.0, -0.1, -0.60, 0.01)
+    else:
+        A, B = 5184, -0.60
     
 st.sidebar.caption("💡 Press 'Enter' after changing values to update the simulation.")
 
@@ -170,6 +175,12 @@ with designer_tab:
                     percent_cp = st.number_input(f"Power (% CP) [{i+1}]", 0, value=120, key=f"pcp_{i}")
                     power = CP * (percent_cp / 100)
                 efforts.append({'type': 'work', 'power': power, 'duration': duration})
+    
+    # Sanity-check warning for efforts below CP
+    for effort in efforts:
+        if effort['power'] <= CP:
+            st.warning(f"Warning: An effort is set to {effort['power']:.0f}W, which is at or below your CP of {CP}W. This will not deplete W'.")
+            break
 
     st.subheader("Step 2: Define Repetitions and Sets")
     reps_per_set = st.number_input("Repetitions per Set", 1, value=5)
