@@ -113,7 +113,7 @@ for i in range(reps):
 if negative_wbal_detected:
     st.error("⚠️ W'bal Depleted!")
     st.markdown(
-        "Your W' balance dropped below zero, which is not physiologically possible. "
+        "Your W' balance dropped below zero, this suggest the session may not be completable. "
         "This indicates the work interval is too long or intense for the given recovery."
     )
     st.markdown("**Here are some suggestions to make the session sustainable:**")
