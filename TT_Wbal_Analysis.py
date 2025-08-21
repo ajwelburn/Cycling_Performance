@@ -140,7 +140,6 @@ if analyze_button:
 
                 # --- POWER AND CADENCE ANALYSIS ---
                 durations = df['time'].diff().fillna(1).tolist()
-                # ... (rest of the analysis logic is the same)
                 total_time_above, total_work_above, total_time_below, total_work_below = 0, 0, 0, 0
                 bouts_above, bouts_below = 0, 0
                 previous_state = 'below' if df['power'].iloc[0] <= CP else 'above'
@@ -233,13 +232,7 @@ if 'results' in st.session_state:
         st.header("Charts")
         df['Wbal_kJ'] = df['Wbal'] / 1000
 
-        fig1, ax1 = plt.subplots(figsize=(12, 6))
-        ax1.plot(df['time'], df['Wbal_kJ'], label='W\'bal', color='purple', linewidth=2)
-        ax1.axhline(y=0, color='grey', linestyle='--', linewidth=1)
-        ax1.set_xlabel('Time (s)'); ax1.set_ylabel('W\'bal (kJ)'); ax1.set_title('W\' Balance Over Time')
-        ax1.grid(False); ax1.legend()
-        st.pyplot(fig1)
-
+        # CONSOLIDATED W'BAL CHART LOGIC
         if 'altitude' in df.columns and df['altitude'].notna().any():
             fig_elev, ax_elev1 = plt.subplots(figsize=(12, 6))
             ax_elev1.set_xlabel('Time (s)'); ax_elev1.set_ylabel('W\'bal (kJ)', color='purple')
@@ -252,6 +245,15 @@ if 'results' in st.session_state:
             ax_elev2.tick_params(axis='y', labelcolor='green')
             fig_elev.suptitle('W\' Balance vs. Elevation'); fig_elev.tight_layout()
             st.pyplot(fig_elev)
+            plt.close(fig_elev)
+        else:
+            fig1, ax1 = plt.subplots(figsize=(12, 6))
+            ax1.plot(df['time'], df['Wbal_kJ'], label='W\'bal', color='purple', linewidth=2)
+            ax1.axhline(y=0, color='grey', linestyle='--', linewidth=1)
+            ax1.set_xlabel('Time (s)'); ax1.set_ylabel('W\'bal (kJ)'); ax1.set_title('W\' Balance Over Time')
+            ax1.grid(False); ax1.legend()
+            st.pyplot(fig1)
+            plt.close(fig1)
 
         fig3, ax3 = plt.subplots(figsize=(12, 6))
         ax3.set_title("Power over Time with Threshold Coloring", fontsize=14)
@@ -267,10 +269,10 @@ if 'results' in st.session_state:
                  verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', facecolor='wheat', alpha=0.5))
         ax3.legend(); ax3.grid(False)
         st.pyplot(fig3)
+        plt.close(fig3)
 
     with tab3:
         st.header("Route Maps")
-        # FIX: Corrected the check for valid GPS data
         if 'position_lat' in df.columns and 'position_long' in df.columns and not df[['position_lat', 'position_long']].dropna().empty:
             gps_df = df[['position_lat', 'position_long', 'Wbal', 'power']].dropna().copy()
             
@@ -307,7 +309,6 @@ if 'results' in st.session_state:
     with tab4:
         st.header("Interactive Data Explorer")
         
-        # Determine available data streams
         available_metrics = ['Power', 'Cadence', 'W\'bal (kJ)']
         if 'heart_rate' in df.columns and df['heart_rate'].sum() > 0:
             available_metrics.append('Heart Rate')
@@ -327,20 +328,18 @@ if 'results' in st.session_state:
             fig_interactive, ax_interactive = plt.subplots(figsize=(12, 6))
             ax_interactive.set_xlabel('Time (s)')
             
-            # Plotting logic with dual-axis support
             ax2 = ax_interactive.twinx()
             ax_map = {'Power': ax_interactive, 'Cadence': ax2, 'Heart Rate': ax2, 'Altitude': ax2, 'W\'bal (kJ)': ax_interactive}
             color_map = {'Power': 'blue', 'Cadence': 'green', 'Heart Rate': 'red', 'Altitude': 'orange', 'W\'bal (kJ)': 'purple'}
             label_map = {'Power': 'Power (W)', 'Cadence': 'Cadence (rpm)', 'Heart Rate': 'Heart Rate (bpm)', 'Altitude': 'Altitude (m)', 'W\'bal (kJ)': 'W\'bal (kJ)'}
             
-            # Keep track of which axes are used
             ax1_used, ax2_used = False, False
 
             for metric in selected_metrics:
                 axis = ax_map[metric]
-                col_name = metric.lower().replace('\'', '').replace(' (kj)', '_kj')
+                # FIX: Correctly generate column name from metric label
+                col_name = metric.lower().replace('\'', '').replace(' (kj)', '_kj').replace(' ', '_')
                 
-                # Apply smoothing
                 smoothed_data = df[col_name].rolling(window=smoothing_window, min_periods=1).mean()
                 
                 axis.plot(df['time'], smoothed_data, label=metric, color=color_map[metric])
@@ -349,13 +348,13 @@ if 'results' in st.session_state:
                 if axis == ax_interactive: ax1_used = True
                 if axis == ax2: ax2_used = True
             
-            # Hide unused axis
             if not ax1_used: ax_interactive.get_yaxis().set_visible(False)
             if not ax2_used: ax2.get_yaxis().set_visible(False)
             
             fig_interactive.legend(loc="upper right", bbox_to_anchor=(1,1), bbox_transform=ax_interactive.transAxes)
             fig_interactive.tight_layout()
             st.pyplot(fig_interactive)
+            plt.close(fig_interactive)
 
         st.markdown("---")
         st.subheader("Download Full Data")
