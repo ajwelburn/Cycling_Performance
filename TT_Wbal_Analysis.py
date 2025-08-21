@@ -190,12 +190,15 @@ def analyze_bouts(df: pd.DataFrame, bouts: List[Dict], bout_type: str, cp: int) 
         
         wbal_change = bout_df['Wbal'].iloc[-1] - bout_df['Wbal'].iloc[0]
         
+        pedaling_cadence = bout_df['cadence'][bout_df['cadence'] > 0]
+        avg_cadence = round(pedaling_cadence.mean()) if not pedaling_cadence.empty else 0
+
         bout_summary = {
             "Bout": f"{bout_type} Bout {i+1}",
             "Duration (s)": bout['duration'],
             "Avg Power (W)": round(bout_df['power'].mean()),
             "Avg Speed (km/h)": round(bout_df['speed_kmh'].mean(), 1),
-            "Avg Cadence (rpm)": round(bout_df['cadence'][bout_df['cadence'] > 0].mean()),
+            "Avg Cadence (rpm)": avg_cadence,
             "W' Change (kJ)": round(wbal_change / 1000, 2)
         }
         
@@ -533,3 +536,4 @@ elif not uploaded_file and analyze_button:
 else:
     if 'results' not in st.session_state:
         st.info("Upload a file and click 'Analyze Ride' to begin.")
+
