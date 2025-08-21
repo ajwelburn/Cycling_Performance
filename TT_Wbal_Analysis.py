@@ -10,8 +10,7 @@ from streamlit_folium import st_folium
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from typing import Tuple, List, Dict
-from datetime import datetime
-import requests
+from datetime import datetime, time, date
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -46,6 +45,7 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
                             "heart_rate": frame.get_value("heart_rate", fallback=None),
                             "speed": frame.get_value("speed", fallback=None),
                             "distance": frame.get_value("distance", fallback=None),
+                            "temperature": frame.get_value("temperature", fallback=None),
                             "position_lat": frame.get_value("position_lat", fallback=None),
                             "position_long": frame.get_value("position_long", fallback=None),
                         }
@@ -75,8 +75,8 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     missing_power_count = df['power'].isnull().sum()
     df['power'].fillna(0, inplace=True)
     
-    for col in ['power', 'cadence', 'heart_rate', 'speed', 'distance']:
-        if col not in df.columns: df[col] = 0
+    for col in ['power', 'cadence', 'heart_rate', 'speed', 'distance', 'temperature']:
+        if col not in df.columns: df[col] = np.nan
         df[col].fillna(0, inplace=True)
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
@@ -344,7 +344,7 @@ if 'results' in st.session_state:
     CP, WP = params["CP"], params["WP"]
     df['wbal_kj'] = df['Wbal'] / 1000
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Summary", "🏃 Interval Analysis", "📈 Ride Profile", "⚡ Power Profile", "🗺️ Route Maps", "⚙️ Data Explorer", "📋 Text Summary"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Summary", "🏃 Interval Analysis", "📈 Ride Profile", "⚡ Power Profile", "🗺️ Route Maps", "⚙️ Data Explorer", "📋 Raw Data Explorer"])
 
     with tab1:
         st.header("Ride Summary")
@@ -503,32 +503,19 @@ if 'results' in st.session_state:
             st.plotly_chart(fig_explorer, use_container_width=True)
             
     with tab7:
-        st.header("Text Summary Report")
-        st.markdown("You can copy the text below to save or share your ride summary.")
+        st.header("Raw Data Explorer")
         
-        report_text = f"""
-        ## Ride Analysis Report
-        **Date:** {ride_info['start_time'].strftime('%d %b %Y') if ride_info['start_time'] else 'N/A'}
-        **Time of Day:** {get_time_of_day(ride_info['start_time'].hour) if ride_info['start_time'] else 'N/A'}
-
-        ### Overall Metrics
-        - **Total Distance:** {metrics['total_distance']} km
-        - **Average Power:** {metrics['avg_power_overall']} W
-        - **Average Speed:** {metrics['avg_speed_overall']} km/h
-
-        ### Power Analysis (CP: {CP} W)
-        - **Time Above CP:** {round(metrics['total_time_above'])} s
-        - **Avg Power Above CP:** {metrics['avg_power_above']} W
-        - **Time Below CP:** {round(metrics['total_time_below'])} s
-        - **Avg Power Below CP:** {metrics['avg_power_below']} W
-
-        ### Top 3 Efforts
-        {interval_analysis['above_summary'].to_markdown(index=False)}
-
-        ### Top 3 Recovery Periods
-        {interval_analysis['below_summary'].to_markdown(index=False)}
-        """
-        st.text_area("Copyable Report", report_text, height=400)
+        cols_to_show = [col for col in ['power', 'cadence', 'heart_rate', 'altitude', 'speed_kmh', 'temperature'] if col in df.columns and df[col].notna().any()]
+        
+        num_cols = 3
+        cols = st.columns(num_cols)
+        for i, col_name in enumerate(cols_to_show):
+            with cols[i % num_cols]:
+                with st.container():
+                    st.subheader(col_name.replace('_', ' ').title())
+                    st.metric("Average", f"{df[col_name].mean():.1f}")
+                    st.metric("Max", f"{df[col_name].max():.1f}")
+                    st.metric("Min", f"{df[col_name].min():.1f}")
 
 
 elif not uploaded_file and analyze_button:
