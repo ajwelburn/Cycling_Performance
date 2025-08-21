@@ -201,6 +201,9 @@ if 'results' in st.session_state:
     CP = params["CP"]
     WP = params["WP"]
 
+    # FIX: Create Wbal_kJ column before rendering any tabs
+    df['wbal_kj'] = df['Wbal'] / 1000
+
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Summary Metrics", "📈 Charts", "🗺️ Route Maps", "⚙️ Interactive Data"])
 
     with tab1:
@@ -230,13 +233,12 @@ if 'results' in st.session_state:
 
     with tab2:
         st.header("Charts")
-        df['Wbal_kJ'] = df['Wbal'] / 1000
 
         # CONSOLIDATED W'BAL CHART LOGIC
         if 'altitude' in df.columns and df['altitude'].notna().any():
             fig_elev, ax_elev1 = plt.subplots(figsize=(12, 6))
             ax_elev1.set_xlabel('Time (s)'); ax_elev1.set_ylabel('W\'bal (kJ)', color='purple')
-            ax_elev1.plot(df['time'], df['Wbal_kJ'], color='purple', linewidth=2, label='W\'bal')
+            ax_elev1.plot(df['time'], df['wbal_kj'], color='purple', linewidth=2, label='W\'bal')
             ax_elev1.tick_params(axis='y', labelcolor='purple')
             ax_elev1.axhline(y=0, color='grey', linestyle='--', linewidth=1)
             ax_elev2 = ax_elev1.twinx()
@@ -245,15 +247,13 @@ if 'results' in st.session_state:
             ax_elev2.tick_params(axis='y', labelcolor='green')
             fig_elev.suptitle('W\' Balance vs. Elevation'); fig_elev.tight_layout()
             st.pyplot(fig_elev)
-            plt.close(fig_elev)
         else:
             fig1, ax1 = plt.subplots(figsize=(12, 6))
-            ax1.plot(df['time'], df['Wbal_kJ'], label='W\'bal', color='purple', linewidth=2)
+            ax1.plot(df['time'], df['wbal_kj'], label='W\'bal', color='purple', linewidth=2)
             ax1.axhline(y=0, color='grey', linestyle='--', linewidth=1)
             ax1.set_xlabel('Time (s)'); ax1.set_ylabel('W\'bal (kJ)'); ax1.set_title('W\' Balance Over Time')
             ax1.grid(False); ax1.legend()
             st.pyplot(fig1)
-            plt.close(fig1)
 
         fig3, ax3 = plt.subplots(figsize=(12, 6))
         ax3.set_title("Power over Time with Threshold Coloring", fontsize=14)
@@ -269,7 +269,7 @@ if 'results' in st.session_state:
                  verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', facecolor='wheat', alpha=0.5))
         ax3.legend(); ax3.grid(False)
         st.pyplot(fig3)
-        plt.close(fig3)
+        plt.close('all') # Close all figures to prevent memory leaks and stray text
 
     with tab3:
         st.header("Route Maps")
