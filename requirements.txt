@@ -7,3 +7,5 @@ fitdecode
 folium
 branca
 streamlit-folium
+fpdf2
+kaleido
