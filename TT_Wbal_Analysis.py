@@ -125,7 +125,6 @@ with st.sidebar:
     st.caption("Note: Your data is processed in memory and is deleted when you close the browser tab. No data is stored.")
     
     st.header("2. Input Parameters")
-    # ... (Input parameters remain the same)
     if 'A' not in st.session_state: st.session_state.A = 6000.0
     if 'B' not in st.session_state: st.session_state.B = -0.68
     if 'CP' not in st.session_state: st.session_state.CP = 350
@@ -208,7 +207,6 @@ if analyze_button:
                         total_time_below += dur
                         total_work_below += powr * dur
                 
-                # --- NEW: POWER PROFILE CALCULATIONS ---
                 power_zones_df = calculate_power_zones(df['power'], CP)
                 mmp_df = calculate_mmp_curve(df['power'])
 
@@ -220,6 +218,11 @@ if analyze_button:
                         "avg_power_overall": round(df['power'].mean()),
                         "total_time_above": total_time_above, "total_time_below": total_time_below,
                         "bouts_above": bouts_above, "bouts_below": bouts_below,
+                        "avg_cadence": round(cadence_sum / cadence_count) if cadence_count > 0 else 0,
+                        "avg_cadence_above": round(cadence_above_sum / cadence_above_count) if cadence_above_count > 0 else 0,
+                        "avg_cadence_below": round(cadence_below_sum / cadence_below_count) if cadence_below_count > 0 else 0,
+                        "coasting_time": coasting_time,
+                        "coasting_percent": round((coasting_time / sum(durations)) * 100) if sum(durations) > 0 else 0,
                     },
                     "power_profile": {
                         "zones": power_zones_df,
@@ -256,10 +259,17 @@ if 'results' in st.session_state:
             st.metric("Total Time", f"{round(metrics['total_time_below'])} s")
             st.metric("Avg Power", f"{metrics['avg_power_below']} W")
             st.metric("Number of Bouts", f"{metrics['bouts_below']}")
+        
+        st.divider()
+        st.subheader("Cadence Analysis")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Avg Cadence Overall", f"{metrics['avg_cadence']} rpm")
+        c2.metric("Avg Cadence >CP", f"{metrics['avg_cadence_above']} rpm")
+        c3.metric("Avg Cadence <=CP", f"{metrics['avg_cadence_below']} rpm")
+        st.metric("Total Coasting Time (Cadence=0)", f"{round(metrics['coasting_time'])}s ({metrics['coasting_percent']}%)")
 
     with tab2:
         st.header("Ride Profile Charts")
-        # W'bal vs Elevation Chart
         fig_wbal = make_subplots(specs=[[{"secondary_y": True}]])
         fig_wbal.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=False)
         if 'altitude' in df.columns and df['altitude'].notna().any():
@@ -268,7 +278,6 @@ if 'results' in st.session_state:
         fig_wbal.update_yaxes(title_text="W'bal (kJ)", secondary_y=False); fig_wbal.update_yaxes(title_text="Elevation (m)", secondary_y=True)
         st.plotly_chart(fig_wbal, use_container_width=True)
 
-        # Power vs Time Chart
         fig_power = go.Figure()
         fig_power.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='lightgrey', width=0.5)))
         fig_power.add_shape(type="line", x0=df['time'].min(), y0=CP, x1=df['time'].max(), y1=CP, line=dict(color="#ff7f0e", width=2, dash="dash"), name=f"CP ({CP}W)")
@@ -277,16 +286,20 @@ if 'results' in st.session_state:
 
     with tab3:
         st.header("Power Profile")
-        # Power Zones Chart
         zones_df = power_profile["zones"]
         fig_zones = go.Figure(go.Bar(x=zones_df['Time (s)'], y=zones_df['Zone'], orientation='h', text=zones_df['Percentage'].apply(lambda x: f'{x:.1f}%')))
         fig_zones.update_layout(title_text='Time in Power Zones', template='plotly_dark')
         st.plotly_chart(fig_zones, use_container_width=True)
         
-        # MMP Curve Chart
         mmp_df = power_profile["mmp"]
         fig_mmp = go.Figure(go.Scatter(x=mmp_df['Duration (s)'], y=mmp_df['Max Power (W)'], mode='lines+markers'))
-        fig_mmp.update_layout(title_text='Mean Maximal Power (MMP) Curve', template='plotly_dark', xaxis_type="log")
+        fig_mmp.update_layout(title_text='Mean Maximal Power (MMP) Curve', template='plotly_dark', 
+                              xaxis_type="log",
+                              xaxis = dict(
+                                tickmode = 'array',
+                                tickvals = [1, 5, 10, 30, 60, 120, 300, 600, 1200, 1800, 3600],
+                                ticktext = ['1s', '5s', '10s', '30s', '1m', '2m', '5m', '10m', '20m', '30m', '60m']
+                            ))
         fig_mmp.update_xaxes(title_text='Duration (log scale)'); fig_mmp.update_yaxes(title_text='Max Power (W)')
         st.plotly_chart(fig_mmp, use_container_width=True)
 
@@ -295,11 +308,10 @@ if 'results' in st.session_state:
         if 'position_lat' in df.columns and 'position_long' in df.columns and not df[['position_lat', 'position_long']].dropna().empty:
             gps_df = df[['position_lat', 'position_long', 'Wbal', 'power', 'speed_kmh']].dropna().copy()
             
-            # ... (Map logic remains the same, using corrected colormaps)
             st.subheader("Route Colored by W' Balance (%)")
             gps_df['Wbal_percent'] = (gps_df['Wbal'] / WP) * 100
             gps_df['Wbal_percent'] = gps_df['Wbal_percent'].clip(0, 100)
-            wbal_colormap = cm.linear.Plasma_6.scale(0, 100)
+            wbal_colormap = cm.linear.Plasma.scale(0, 100)
             m_wbal = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB dark_matter')
             for i in range(len(gps_df) - 1):
                 p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
