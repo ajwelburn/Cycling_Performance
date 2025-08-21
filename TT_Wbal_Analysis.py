@@ -34,6 +34,7 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, List[int]]:
                             "timestamp": frame.get_value("timestamp", fallback=None),
                             "power": frame.get_value("power", fallback=None),
                             "cadence": frame.get_value("cadence", fallback=None),
+                            "altitude": frame.get_value("altitude", fallback=None),
                             "position_lat": frame.get_value("position_lat", fallback=None),
                             "position_long": frame.get_value("position_long", fallback=None),
                         }
@@ -69,15 +70,14 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, List[int]]:
     df['cadence'].fillna(0, inplace=True)
     df['cadence'] = pd.to_numeric(df['cadence'], errors='coerce')
 
+    if 'altitude' in df.columns:
+        df['altitude'].fillna(method='ffill', inplace=True) # Forward fill any gaps in altitude
+
     return df, missing_count, missing_times
 
 # --- Main App Interface ---
-st.title("🚴 W' Balance and Time Trial Analysis Tool")
-st.markdown("""
-Upload your `.fit` file and input your physiological parameters to analyze your ride.
-The tool calculates your W' balance, provides detailed power and cadence metrics,
-and visualizes your effort on charts and interactive maps.
-""")
+st.title("� W' Balance and Time Trial Analysis Tool")
+st.markdown("Upload a `.fit` file and set your parameters to generate a detailed performance analysis.")
 
 # --- Sidebar for Inputs ---
 with st.sidebar:
@@ -132,7 +132,6 @@ if uploaded_file and analyze_button:
                     Tau = A * (DCP2 ** B) if DCP2 > 0 else 0
                     Wbal = WP - (Wexp * m.exp(-1 / Tau)) if Tau > 0 else Wbal
                 
-                # MODIFICATION: Allow W'bal to go negative by removing max(0, ...)
                 Wbal = min(WP, Wbal)
                 Wexp = WP - Wbal
                 Rec = Wbal - Wbal_old
@@ -225,15 +224,36 @@ if uploaded_file and analyze_button:
 
         with tab2:
             st.header("Charts")
-            plt.style.use('seaborn-v0_8-whitegrid') # Modern plot style
 
             # PLOT 1: W' Balance Over Time
             fig1, ax1 = plt.subplots(figsize=(12, 6))
             ax1.plot(df['time'], df['Wbal'], label='W\'bal', color='purple', linewidth=2)
-            ax1.axhline(y=0, color='grey', linestyle='--', linewidth=1) # Add zero line
+            ax1.axhline(y=0, color='grey', linestyle='--', linewidth=1)
             ax1.set_xlabel('Time (s)'), ax1.set_ylabel('W\'bal (Joules)'), ax1.set_title('W\' Balance Over Time')
+            ax1.grid(False)
             ax1.legend()
             st.pyplot(fig1)
+
+            # NEW PLOT: W'bal and Elevation
+            if 'altitude' in df.columns and df['altitude'].notna().any():
+                fig_elev, ax_elev1 = plt.subplots(figsize=(12, 6))
+                
+                # W'bal axis (left)
+                ax_elev1.set_xlabel('Time (s)')
+                ax_elev1.set_ylabel('W\'bal (Joules)', color='purple')
+                ax_elev1.plot(df['time'], df['Wbal'], color='purple', linewidth=2, label='W\'bal')
+                ax_elev1.tick_params(axis='y', labelcolor='purple')
+                ax_elev1.axhline(y=0, color='grey', linestyle='--', linewidth=1)
+                
+                # Elevation axis (right)
+                ax_elev2 = ax_elev1.twinx()
+                ax_elev2.set_ylabel('Elevation (m)', color='green')
+                ax_elev2.plot(df['time'], df['altitude'], color='green', linewidth=2, label='Elevation')
+                ax_elev2.tick_params(axis='y', labelcolor='green')
+
+                fig_elev.suptitle('W\' Balance vs. Elevation')
+                fig_elev.tight_layout()
+                st.pyplot(fig_elev)
 
             # PLOT 2: Summary Bar Plots
             labels, time_data = ['Above CP', 'Below CP'], [round(total_time_above), round(total_time_below)]
@@ -241,6 +261,7 @@ if uploaded_file and analyze_button:
             avg_bout_time = [avg_time_per_bout_above, avg_time_per_bout_below]
             fig2, axs = plt.subplots(1, 4, figsize=(15, 4))
             fig2.suptitle(f"Power Data Summary (Threshold = {int(CP)} W)", fontsize=14)
+            for ax in axs: ax.grid(False) # Remove gridlines
             axs[0].bar(labels, time_data, color=['#d62728', '#1f77b4']), axs[0].set_title("Total Time (s)")
             axs[1].bar(labels, avg_power_data, color=['#d62728', '#1f77b4']), axs[1].set_title("Average Power (W)")
             axs[2].bar(labels, bouts_data, color=['#d62728', '#1f77b4']), axs[2].set_title("Number of Bouts")
@@ -257,15 +278,17 @@ if uploaded_file and analyze_button:
             ax3.plot(df['time'], df['power'], color='black', linewidth=0.5, label='Power')
             ax3.axhline(y=CP, color='orange', linestyle='--', label=f"CP = {int(CP)} W")
             ax3.legend()
+            ax3.grid(False)
             st.pyplot(fig3)
 
             # PLOT 4: Power vs. Cadence Heatmap (smaller)
             pedaling_df = df[df['cadence'] > 0]
             if not pedaling_df.empty:
-                fig4, ax4 = plt.subplots(figsize=(8, 5)) # MODIFICATION: Smaller figure size
+                fig4, ax4 = plt.subplots(figsize=(8, 5))
                 hb = ax4.hexbin(pedaling_df['cadence'], pedaling_df['power'], gridsize=40, cmap='viridis', mincnt=1)
                 fig4.colorbar(hb, ax=ax4, label='Frequency of Occurrence')
                 ax4.set_xlabel("Cadence (rpm)"), ax4.set_ylabel("Power (W)"), ax4.set_title("Power vs. Cadence Density")
+                ax4.grid(False)
                 st.pyplot(fig4)
 
         with tab3:
@@ -275,9 +298,9 @@ if uploaded_file and analyze_button:
                 
                 st.subheader("Route Colored by W' Balance (%)")
                 gps_df['Wbal_percent'] = (gps_df['Wbal'] / WP) * 100
+                gps_df['Wbal_percent'] = gps_df['Wbal_percent'].clip(0, 100)
                 points = list(zip(gps_df['position_lat'], gps_df['position_long']))
                 wbal_colormap = cm.linear.RdYlGn_09.scale(0, 100)
-                # FIX: Cast numpy float to standard float for colormap
                 wbal_colors = [wbal_colormap(float(p)) for p in gps_df['Wbal_percent']]
                 m_wbal = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13)
                 ColorLine(points, colors=wbal_colors, colormap=wbal_colormap, weight=5).add_to(m_wbal)
@@ -289,7 +312,6 @@ if uploaded_file and analyze_button:
                 power_diff = gps_df['power'] - CP
                 norm_power = np.clip(power_diff, -150, 150)
                 power_colormap = cm.linear.RdBu_11.scale(-150, 150)
-                # FIX: Cast numpy float to standard float for colormap
                 power_colors = [power_colormap(float(p)) for p in norm_power]
                 m_power = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13)
                 ColorLine(points, colors=power_colors, colormap=power_colormap, weight=5).add_to(m_power)
