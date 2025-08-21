@@ -56,6 +56,7 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
         return pd.DataFrame(), 0, None
 
     if not records:
+        st.warning("The selected .fit file contains no data records.")
         return pd.DataFrame(), 0, None
 
     df = pd.DataFrame(records)
@@ -73,12 +74,14 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     df.drop(columns=['timestamp'], inplace=True, errors='ignore')
 
     missing_power_count = df['power'].isnull().sum()
+    if missing_power_count > 0:
+        st.warning(f"Note: Found and replaced {missing_power_count} missing power data point(s) with 0.")
     df['power'].fillna(0, inplace=True)
     
     for col in ['power', 'cadence', 'heart_rate', 'speed', 'distance', 'temperature']:
         if col not in df.columns: df[col] = np.nan
-        df[col].fillna(0, inplace=True)
-        df[col] = pd.to_numeric(df[col], errors='coerce')
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
 
     if 'altitude' in df.columns: df['altitude'].fillna(method='ffill', inplace=True)
     if 'speed' in df.columns: df['speed_kmh'] = df['speed'] * 3.6
@@ -351,7 +354,7 @@ if 'results' in st.session_state:
         col1, col2 = st.columns(2)
         with col1:
             st.subheader("Ride Details")
-            if ride_info["start_time"]:
+            if ride_info["start_time"] and isinstance(ride_info["start_time"], datetime):
                 st.metric("Date", ride_info["start_time"].strftime("%d %b %Y"))
                 st.metric("Time of Day", get_time_of_day(ride_info["start_time"].hour))
             else:
@@ -524,3 +527,4 @@ elif not uploaded_file and analyze_button:
 else:
     if 'results' not in st.session_state:
         st.info("Upload a file and click 'Analyze Ride' to begin.")
+
