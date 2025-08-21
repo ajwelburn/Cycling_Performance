@@ -65,8 +65,12 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     if 'position_long' in df.columns:
         df['position_long'] = df['position_long'] * (180 / 2**31) if df['position_long'].notnull().any() else np.nan
 
-    df['time'] = (df['timestamp'] - start_time).dt.total_seconds()
-    df.drop(columns=['timestamp'], inplace=True)
+    if start_time:
+        df['time'] = (df['timestamp'] - start_time).dt.total_seconds()
+    else: # Fallback if no timestamp is found
+        df['time'] = range(len(df))
+        
+    df.drop(columns=['timestamp'], inplace=True, errors='ignore')
 
     missing_power_count = df['power'].isnull().sum()
     df['power'].fillna(0, inplace=True)
@@ -84,7 +88,7 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
 @st.cache_data
 def get_weather_data(lat: float, lon: float, start_time: datetime) -> Dict:
     """Fetches historical weather data from Open-Meteo API."""
-    if lat is None or lon is None or start_time is None:
+    if lat is None or lon is None or not isinstance(start_time, datetime):
         return None
     
     try:
@@ -94,7 +98,7 @@ def get_weather_data(lat: float, lon: float, start_time: datetime) -> Dict:
             f"&start_date={date_str}&end_date={date_str}"
             "&hourly=temperature_2m,relativehumidity_2m,windspeed_10m,winddirection_10m"
         )
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         if response.status_code == 200:
             data = response.json()
             hour = start_time.hour
@@ -104,8 +108,9 @@ def get_weather_data(lat: float, lon: float, start_time: datetime) -> Dict:
                 "wind_speed": data['hourly']['windspeed_10m'][hour],
                 "wind_direction": data['hourly']['winddirection_10m'][hour],
             }
-    except Exception as e:
-        st.warning(f"Could not fetch weather data: {e}")
+    except Exception:
+        # Fail silently if weather API is down or there's a network issue
+        pass
     return None
 
 @st.cache_data
@@ -320,7 +325,12 @@ if analyze_button:
 # Display results if they exist in the session state
 if 'results' in st.session_state:
     results = st.session_state.results
-    df, metrics, params, power_profile, ride_info, interval_analysis = results.values()
+    df = results["df"]
+    metrics = results["metrics"]
+    params = results["params"]
+    power_profile = results["power_profile"]
+    ride_info = results["ride_info"]
+    interval_analysis = results["interval_analysis"]
     CP, WP = params["CP"], params["WP"]
     df['wbal_kj'] = df['Wbal'] / 1000
 
