@@ -34,6 +34,7 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, List[int]]:
                             "power": frame.get_value("power", fallback=None),
                             "cadence": frame.get_value("cadence", fallback=None),
                             "altitude": frame.get_value("altitude", fallback=None),
+                            "heart_rate": frame.get_value("heart_rate", fallback=None),
                             "position_lat": frame.get_value("position_lat", fallback=None),
                             "position_long": frame.get_value("position_long", fallback=None),
                         }
@@ -64,10 +65,11 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, List[int]]:
     df['power'].fillna(0, inplace=True)
     df['power'] = pd.to_numeric(df['power'], errors='coerce')
 
-    if 'cadence' not in df.columns:
-        df['cadence'] = 0
-    df['cadence'].fillna(0, inplace=True)
-    df['cadence'] = pd.to_numeric(df['cadence'], errors='coerce')
+    for col in ['cadence', 'heart_rate']:
+        if col not in df.columns:
+            df[col] = 0
+        df[col].fillna(0, inplace=True)
+        df[col] = pd.to_numeric(df[col], errors='coerce')
 
     if 'altitude' in df.columns:
         df['altitude'].fillna(method='ffill', inplace=True)
@@ -97,8 +99,7 @@ with st.sidebar:
 
     analyze_button = st.button("Analyze Ride", type="primary")
 
-# --- State Management to Prevent Refreshing ---
-# If a new file is uploaded, clear the previous results
+# --- State Management ---
 if 'current_file' not in st.session_state:
     st.session_state.current_file = None
 
@@ -108,7 +109,6 @@ if uploaded_file and uploaded_file.name != st.session_state.current_file:
         del st.session_state['results']
 
 # --- Main Panel Logic ---
-# Perform analysis only when the button is clicked
 if analyze_button:
     if uploaded_file:
         WP = WP_kJ * 1000
@@ -123,7 +123,7 @@ if analyze_button:
             with st.spinner("Analyzing..."):
                 # --- W'bal CALCULATION ---
                 Wbal, Wbal_old = float(WP), float(WP)
-                wbal_list, tau_list = [float(WP)], []
+                wbal_list = [float(WP)]
                 power_np = df['power'].to_numpy()
                 for i in range(1, len(df)):
                     P = power_np[i]
@@ -140,6 +140,7 @@ if analyze_button:
 
                 # --- POWER AND CADENCE ANALYSIS ---
                 durations = df['time'].diff().fillna(1).tolist()
+                # ... (rest of the analysis logic is the same)
                 total_time_above, total_work_above, total_time_below, total_work_below = 0, 0, 0, 0
                 bouts_above, bouts_below = 0, 0
                 previous_state = 'below' if df['power'].iloc[0] <= CP else 'above'
@@ -169,7 +170,7 @@ if analyze_button:
                     else:
                         total_time_below += dur
                         total_work_below += powr * dur
-
+                
                 # Store results in session state
                 st.session_state.results = {
                     "df": df,
@@ -201,7 +202,7 @@ if 'results' in st.session_state:
     CP = params["CP"]
     WP = params["WP"]
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Summary Metrics", "📈 Charts", "🗺️ Route Maps", "📋 Raw Data"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Summary Metrics", "📈 Charts", "🗺️ Route Maps", "⚙️ Interactive Data"])
 
     with tab1:
         st.header(f"Summary Metrics (Threshold = {int(CP)} W)")
@@ -230,29 +231,31 @@ if 'results' in st.session_state:
 
     with tab2:
         st.header("Charts")
+        df['Wbal_kJ'] = df['Wbal'] / 1000
+
         fig1, ax1 = plt.subplots(figsize=(12, 6))
-        ax1.plot(df['time'], df['Wbal'], label='W\'bal', color='purple', linewidth=2)
+        ax1.plot(df['time'], df['Wbal_kJ'], label='W\'bal', color='purple', linewidth=2)
         ax1.axhline(y=0, color='grey', linestyle='--', linewidth=1)
-        ax1.set_xlabel('Time (s)'), ax1.set_ylabel('W\'bal (Joules)'), ax1.set_title('W\' Balance Over Time')
-        ax1.grid(False), ax1.legend()
+        ax1.set_xlabel('Time (s)'); ax1.set_ylabel('W\'bal (kJ)'); ax1.set_title('W\' Balance Over Time')
+        ax1.grid(False); ax1.legend()
         st.pyplot(fig1)
 
         if 'altitude' in df.columns and df['altitude'].notna().any():
             fig_elev, ax_elev1 = plt.subplots(figsize=(12, 6))
-            ax_elev1.set_xlabel('Time (s)'), ax_elev1.set_ylabel('W\'bal (Joules)', color='purple')
-            ax_elev1.plot(df['time'], df['Wbal'], color='purple', linewidth=2, label='W\'bal')
+            ax_elev1.set_xlabel('Time (s)'); ax_elev1.set_ylabel('W\'bal (kJ)', color='purple')
+            ax_elev1.plot(df['time'], df['Wbal_kJ'], color='purple', linewidth=2, label='W\'bal')
             ax_elev1.tick_params(axis='y', labelcolor='purple')
             ax_elev1.axhline(y=0, color='grey', linestyle='--', linewidth=1)
             ax_elev2 = ax_elev1.twinx()
             ax_elev2.set_ylabel('Elevation (m)', color='green')
             ax_elev2.plot(df['time'], df['altitude'], color='green', linewidth=2, label='Elevation')
             ax_elev2.tick_params(axis='y', labelcolor='green')
-            fig_elev.suptitle('W\' Balance vs. Elevation'), fig_elev.tight_layout()
+            fig_elev.suptitle('W\' Balance vs. Elevation'); fig_elev.tight_layout()
             st.pyplot(fig_elev)
 
         fig3, ax3 = plt.subplots(figsize=(12, 6))
         ax3.set_title("Power over Time with Threshold Coloring", fontsize=14)
-        ax3.set_xlabel("Time (s)"), ax3.set_ylabel("Power (W)")
+        ax3.set_xlabel("Time (s)"); ax3.set_ylabel("Power (W)")
         ax3.fill_between(df['time'], df['power'], CP, where=df['power'] <= CP, color='#1f77b4', alpha=0.5, interpolate=True)
         ax3.fill_between(df['time'], df['power'], CP, where=df['power'] > CP, color='#d62728', alpha=0.5, interpolate=True)
         ax3.plot(df['time'], df['power'], color='black', linewidth=0.5, label='Power')
@@ -262,12 +265,13 @@ if 'results' in st.session_state:
                       f"Avg Power (<=CP): {metrics['avg_power_below']} W")
         ax3.text(0.02, 0.95, stats_text, transform=ax3.transAxes, fontsize=10,
                  verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', facecolor='wheat', alpha=0.5))
-        ax3.legend(), ax3.grid(False)
+        ax3.legend(); ax3.grid(False)
         st.pyplot(fig3)
 
     with tab3:
         st.header("Route Maps")
-        if 'position_lat' in df.columns and df['position_long'].notnull().all(axis=1).any():
+        # FIX: Corrected the check for valid GPS data
+        if 'position_lat' in df.columns and 'position_long' in df.columns and not df[['position_lat', 'position_long']].dropna().empty:
             gps_df = df[['position_lat', 'position_long', 'Wbal', 'power']].dropna().copy()
             
             st.subheader("Route Colored by W' Balance (%)")
@@ -301,8 +305,60 @@ if 'results' in st.session_state:
             st.warning("No GPS data found in the file to generate maps.")
 
     with tab4:
-        st.header("Full Data Table")
-        st.dataframe(df.round(2))
+        st.header("Interactive Data Explorer")
+        
+        # Determine available data streams
+        available_metrics = ['Power', 'Cadence', 'W\'bal (kJ)']
+        if 'heart_rate' in df.columns and df['heart_rate'].sum() > 0:
+            available_metrics.append('Heart Rate')
+        if 'altitude' in df.columns and df['altitude'].notna().any():
+            available_metrics.append('Altitude')
+
+        selected_metrics = st.multiselect(
+            "Select data to display:",
+            options=available_metrics,
+            default=['Power', 'W\'bal (kJ)']
+        )
+
+        smoothing_window = st.slider("Smoothing (seconds)", min_value=1, max_value=30, value=5,
+                                     help="Applies a rolling average to the data. 1 = raw data.")
+
+        if selected_metrics:
+            fig_interactive, ax_interactive = plt.subplots(figsize=(12, 6))
+            ax_interactive.set_xlabel('Time (s)')
+            
+            # Plotting logic with dual-axis support
+            ax2 = ax_interactive.twinx()
+            ax_map = {'Power': ax_interactive, 'Cadence': ax2, 'Heart Rate': ax2, 'Altitude': ax2, 'W\'bal (kJ)': ax_interactive}
+            color_map = {'Power': 'blue', 'Cadence': 'green', 'Heart Rate': 'red', 'Altitude': 'orange', 'W\'bal (kJ)': 'purple'}
+            label_map = {'Power': 'Power (W)', 'Cadence': 'Cadence (rpm)', 'Heart Rate': 'Heart Rate (bpm)', 'Altitude': 'Altitude (m)', 'W\'bal (kJ)': 'W\'bal (kJ)'}
+            
+            # Keep track of which axes are used
+            ax1_used, ax2_used = False, False
+
+            for metric in selected_metrics:
+                axis = ax_map[metric]
+                col_name = metric.lower().replace('\'', '').replace(' (kj)', '_kj')
+                
+                # Apply smoothing
+                smoothed_data = df[col_name].rolling(window=smoothing_window, min_periods=1).mean()
+                
+                axis.plot(df['time'], smoothed_data, label=metric, color=color_map[metric])
+                axis.set_ylabel(label_map[metric], color=color_map[metric])
+                axis.tick_params(axis='y', labelcolor=color_map[metric])
+                if axis == ax_interactive: ax1_used = True
+                if axis == ax2: ax2_used = True
+            
+            # Hide unused axis
+            if not ax1_used: ax_interactive.get_yaxis().set_visible(False)
+            if not ax2_used: ax2.get_yaxis().set_visible(False)
+            
+            fig_interactive.legend(loc="upper right", bbox_to_anchor=(1,1), bbox_transform=ax_interactive.transAxes)
+            fig_interactive.tight_layout()
+            st.pyplot(fig_interactive)
+
+        st.markdown("---")
+        st.subheader("Download Full Data")
         @st.cache_data
         def convert_df_to_csv(df_to_convert):
             return df_to_convert.to_csv(index=False).encode('utf-8')
