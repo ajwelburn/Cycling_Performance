@@ -10,6 +10,7 @@ from streamlit_folium import st_folium
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from typing import Tuple, List, Dict
+from datetime import datetime
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -21,16 +22,22 @@ st.set_page_config(
 # --- 1. ANALYSIS FUNCTIONS (Cached for performance) ---
 
 @st.cache_data
-def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int]:
+def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     """
     Parses the in-memory .fit file content into a pandas DataFrame.
+    Returns the DataFrame, missing power count, and the ride start time.
     """
     records = []
+    start_time = None
     try:
         with io.BytesIO(file_content) as fit_file:
             with fitdecode.FitReader(fit_file) as fit:
                 for frame in fit:
                     if frame.frame_type == fitdecode.FIT_FRAME_DATA and frame.name == "record":
+                        # Capture the start time from the first record
+                        if start_time is None and frame.has_field("timestamp"):
+                            start_time = frame.get_value("timestamp")
+
                         record_data = {
                             "timestamp": frame.get_value("timestamp", fallback=None),
                             "power": frame.get_value("power", fallback=None),
@@ -38,6 +45,7 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int]:
                             "altitude": frame.get_value("altitude", fallback=None),
                             "heart_rate": frame.get_value("heart_rate", fallback=None),
                             "speed": frame.get_value("speed", fallback=None),
+                            "distance": frame.get_value("distance", fallback=None),
                             "position_lat": frame.get_value("position_lat", fallback=None),
                             "position_long": frame.get_value("position_long", fallback=None),
                         }
@@ -45,10 +53,10 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int]:
                             records.append(record_data)
     except fitdecode.FitDecodeError as e:
         st.error(f"Error decoding .fit file: {e}")
-        return pd.DataFrame(), 0
+        return pd.DataFrame(), 0, None
 
     if not records:
-        return pd.DataFrame(), 0
+        return pd.DataFrame(), 0, None
 
     df = pd.DataFrame(records)
     
@@ -57,14 +65,13 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int]:
     if 'position_long' in df.columns:
         df['position_long'] = df['position_long'] * (180 / 2**31) if df['position_long'].notnull().any() else np.nan
 
-    start_time = df['timestamp'].iloc[0]
     df['time'] = (df['timestamp'] - start_time).dt.total_seconds()
     df.drop(columns=['timestamp'], inplace=True)
 
     missing_power_count = df['power'].isnull().sum()
     df['power'].fillna(0, inplace=True)
     
-    for col in ['power', 'cadence', 'heart_rate', 'speed']:
+    for col in ['power', 'cadence', 'heart_rate', 'speed', 'distance']:
         if col not in df.columns: df[col] = 0
         df[col].fillna(0, inplace=True)
         df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -72,7 +79,7 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int]:
     if 'altitude' in df.columns: df['altitude'].fillna(method='ffill', inplace=True)
     if 'speed' in df.columns: df['speed_kmh'] = df['speed'] * 3.6
 
-    return df, missing_power_count
+    return df, missing_power_count, start_time
 
 @st.cache_data
 def calculate_power_zones(power_data: pd.Series, cp: int) -> pd.DataFrame:
@@ -113,6 +120,14 @@ def calculate_mmp_curve(power_data: pd.Series) -> pd.DataFrame:
     
     return pd.DataFrame(list(mmp.items()), columns=["Duration (s)", "Max Power (W)"])
 
+def get_time_of_day(hour: int) -> str:
+    """Categorizes the hour into Morning, Afternoon, or Evening."""
+    if 5 <= hour < 12:
+        return "Morning"
+    elif 12 <= hour < 18:
+        return "Afternoon"
+    else:
+        return "Evening"
 
 # --- Main App Interface ---
 st.title("🚴 W' Balance and Time Trial Analysis Tool")
@@ -151,7 +166,7 @@ if analyze_button:
     if uploaded_file:
         WP = WP_kJ * 1000
         file_content = uploaded_file.getvalue()
-        df, missing_power_count = parse_fit_file(file_content)
+        df, start_time, missing_power_count = parse_fit_file(file_content)
 
         if df.empty:
             st.error("Could not parse the .fit file. It might be empty or corrupted.")
@@ -216,6 +231,8 @@ if analyze_button:
                         "avg_power_above": round(total_work_above / total_time_above) if total_time_above > 0 else 0,
                         "avg_power_below": round(total_work_below / total_time_below) if total_time_below > 0 else 0,
                         "avg_power_overall": round(df['power'].mean()),
+                        "avg_speed_overall": round(df['speed_kmh'].mean(), 1) if 'speed_kmh' in df.columns else 0,
+                        "total_distance": round(df['distance'].max() / 1000, 2) if 'distance' in df.columns else 0,
                         "total_time_above": total_time_above, "total_time_below": total_time_below,
                         "bouts_above": bouts_above, "bouts_below": bouts_below,
                         "avg_cadence": round(cadence_sum / cadence_count) if cadence_count > 0 else 0,
@@ -228,7 +245,8 @@ if analyze_button:
                         "zones": power_zones_df,
                         "mmp": mmp_df
                     },
-                    "params": {"CP": CP, "WP": WP}
+                    "params": {"CP": CP, "WP": WP},
+                    "ride_info": {"start_time": start_time}
                 }
     else:
         st.warning("Please upload a .fit file first.")
@@ -240,14 +258,42 @@ if 'results' in st.session_state:
     metrics = results["metrics"]
     params = results["params"]
     power_profile = results["power_profile"]
+    ride_info = results["ride_info"]
     CP, WP = params["CP"], params["WP"]
     df['wbal_kj'] = df['Wbal'] / 1000
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Summary", "📈 Ride Profile", "⚡ Power Profile", "🗺️ Route Maps", "⚙️ Data Explorer"])
 
     with tab1:
-        st.header(f"Summary Metrics (Threshold = {int(CP)} W)")
-        st.subheader("Power Analysis")
+        st.header("Ride Summary")
+        
+        # --- Ride Conditions ---
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Ride Details")
+            if ride_info["start_time"]:
+                st.metric("Date", ride_info["start_time"].strftime("%d %b %Y"))
+                st.metric("Time of Day", get_time_of_day(ride_info["start_time"].hour))
+        with col2:
+            st.subheader("Weather (Placeholder)")
+            st.info("A weather API integration is required for live data.")
+            temp = 22 # Placeholder
+            thermo_emoji = "☀️" if temp > 20 else "⛅"
+            st.metric(f"Temperature {thermo_emoji}", f"{temp}°C")
+            st.metric("Wind", "15 km/h NW")
+
+        st.divider()
+
+        # --- Overall Metrics ---
+        st.subheader("Overall Ride Metrics")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total Distance", f"{metrics['total_distance']} km")
+        c2.metric("Average Power", f"{metrics['avg_power_overall']} W")
+        c3.metric("Average Speed", f"{metrics['avg_speed_overall']} km/h")
+        
+        st.divider()
+
+        st.header(f"Power Analysis (Threshold = {int(CP)} W)")
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("##### Above CP")
@@ -259,14 +305,6 @@ if 'results' in st.session_state:
             st.metric("Total Time", f"{round(metrics['total_time_below'])} s")
             st.metric("Avg Power", f"{metrics['avg_power_below']} W")
             st.metric("Number of Bouts", f"{metrics['bouts_below']}")
-        
-        st.divider()
-        st.subheader("Cadence Analysis")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Avg Cadence Overall", f"{metrics['avg_cadence']} rpm")
-        c2.metric("Avg Cadence >CP", f"{metrics['avg_cadence_above']} rpm")
-        c3.metric("Avg Cadence <=CP", f"{metrics['avg_cadence_below']} rpm")
-        st.metric("Total Coasting Time (Cadence=0)", f"{round(metrics['coasting_time'])}s ({metrics['coasting_percent']}%)")
 
     with tab2:
         st.header("Ride Profile Charts")
@@ -363,21 +401,32 @@ if 'results' in st.session_state:
 
     with tab5:
         st.header("Interactive Data Explorer")
+        
+        # Determine available data streams
         available_metrics = ['Power', 'Speed (km/h)']
+        if 'cadence' in df.columns and df['cadence'].sum() > 0: available_metrics.append('Cadence')
+        if 'heart_rate' in df.columns and df['heart_rate'].sum() > 0: available_metrics.append('Heart Rate')
+        if 'altitude' in df.columns and df['altitude'].notna().any(): available_metrics.append('Altitude')
+
         selected_metrics = st.multiselect("Select data to display:", options=available_metrics, default=['Power', 'Speed (km/h)'])
         smoothing_window = st.slider("Smoothing (seconds)", min_value=1, max_value=30, value=5)
 
         if selected_metrics:
             fig_explorer = make_subplots(specs=[[{"secondary_y": True}]])
+            
+            # Define which axis each metric belongs to
+            axis_map = {'Power': 'left', 'Altitude': 'left', 'Speed (km/h)': 'right', 'Cadence': 'right', 'Heart Rate': 'right'}
+            
             for metric in selected_metrics:
                 col_name = metric.lower().replace(' (km/h)', '_kmh')
                 smoothed_data = df[col_name].rolling(window=smoothing_window, min_periods=1).mean()
-                is_secondary = metric == 'Speed (km/h)'
+                is_secondary = axis_map.get(metric) == 'right'
                 fig_explorer.add_trace(go.Scatter(x=df['time'], y=smoothed_data, name=metric), secondary_y=is_secondary)
             
             fig_explorer.update_layout(title_text='Data Explorer', template='plotly_white', font=dict(color="black"))
             fig_explorer.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
-            fig_explorer.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
+            fig_explorer.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True, secondary_y=False)
+            fig_explorer.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True, secondary_y=True)
             st.plotly_chart(fig_explorer, use_container_width=True)
 
 elif not uploaded_file and analyze_button:
