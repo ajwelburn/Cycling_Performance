@@ -10,7 +10,8 @@ from streamlit_folium import st_folium
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from typing import Tuple, List, Dict
-from datetime import datetime, time
+from datetime import datetime
+import requests
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -178,7 +179,6 @@ def analyze_bouts(df: pd.DataFrame, bouts: List[Dict], bout_type: str, cp: int) 
         bout_df = df.iloc[bout['start']:bout['end']]
         if bout_df.empty: continue
         
-        # Correctly calculate W' change: positive for recovery, negative for depletion
         wbal_change = bout_df['Wbal'].iloc[-1] - bout_df['Wbal'].iloc[0]
         
         bout_summary = {
@@ -190,7 +190,6 @@ def analyze_bouts(df: pd.DataFrame, bouts: List[Dict], bout_type: str, cp: int) 
             "W' Change (kJ)": round(wbal_change / 1000, 2)
         }
         
-        # Add context-specific power metric
         if bout_type == "Effort":
             bout_summary["Avg Power > CP (W)"] = round(bout_df['power'].mean() - cp)
         else: # Recovery
@@ -345,7 +344,7 @@ if 'results' in st.session_state:
     CP, WP = params["CP"], params["WP"]
     df['wbal_kj'] = df['Wbal'] / 1000
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Summary", "🏃 Interval Analysis", "📈 Ride Profile", "⚡ Power Profile", "🗺️ Route Maps", "⚙️ Data Explorer", "📄 Report"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Summary", "🏃 Interval Analysis", "📈 Ride Profile", "⚡ Power Profile", "🗺️ Route Maps", "⚙️ Data Explorer", "📋 Text Summary"])
 
     with tab1:
         st.header("Ride Summary")
@@ -395,7 +394,6 @@ if 'results' in st.session_state:
         fig_intervals.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='grey', width=1)), secondary_y=False)
         fig_intervals.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=True)
         
-        # Add a single trace for the legend
         fig_intervals.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(color='rgba(214, 39, 40, 0.4)'), name='Top Effort'))
         fig_intervals.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(color='rgba(31, 119, 180, 0.4)'), name='Top Recovery'))
 
@@ -505,90 +503,32 @@ if 'results' in st.session_state:
             st.plotly_chart(fig_explorer, use_container_width=True)
             
     with tab7:
-        st.header("Download Report")
-        st.markdown("Click the button below to generate a PDF summary of your ride analysis.")
-
-        # Store figures in a dictionary to pass to the PDF function
-        figures = {
-            "ride_profile": fig_wbal,
-            "power_profile": fig_power,
-            "interval_analysis": fig_intervals,
-            "power_zones": fig_zones,
-            "mmp_curve": fig_mmp
-        }
-
-        # PDF Generation Logic
-        class PDF(FPDF):
-            def header(self):
-                self.set_font('Arial', 'B', 12)
-                self.cell(0, 10, 'Ride Analysis Report', 0, 1, 'C')
-
-            def chapter_title(self, title):
-                self.set_font('Arial', 'B', 12)
-                self.cell(0, 10, title, 0, 1, 'L')
-                self.ln(5)
-
-            def chapter_body(self, body):
-                self.set_font('Arial', '', 10)
-                self.multi_cell(0, 5, body)
-                self.ln()
-
-            def add_plotly_fig(self, fig, description):
-                img_bytes = fig.to_image(format="png", width=1000, height=400)
-                img_file = io.BytesIO(img_bytes)
-                self.image(img_file, x=10, y=self.get_y(), w=190)
-                self.ln(100) # Move down to accommodate the image
-                self.chapter_body(description)
-
-        @st.cache_data
-        def create_pdf_report(_ride_info, _metrics, _figures):
-            pdf = PDF()
-            pdf.add_page()
-            pdf.set_font('Arial', 'B', 16)
-            pdf.cell(0, 10, 'Overall Ride Summary', 0, 1, 'C')
-            pdf.ln(10)
-            
-            pdf.set_font('Arial', 'B', 12)
-            pdf.cell(0, 10, 'Key Metrics', 0, 1, 'L')
-            pdf.set_font('Arial', '', 10)
-            
-            date_str = "Date not available"
-            if _ride_info and _ride_info.get("start_time") and isinstance(_ride_info["start_time"], datetime):
-                date_str = _ride_info['start_time'].strftime('%d %b %Y')
-
-            pdf.multi_cell(0, 5, 
-                f"Date: {date_str}\n"
-                f"Total Distance: {_metrics['total_distance']} km\n"
-                f"Average Power: {_metrics['avg_power_overall']} W\n"
-                f"Average Speed: {_metrics['avg_speed_overall']} km/h"
-            )
-            pdf.ln(5)
-
-            # Add figures, two per page
-            pdf.add_page()
-            pdf.chapter_title("Ride Profile Analysis")
-            pdf.add_plotly_fig(_figures["ride_profile"], "This chart shows your W' balance (purple) overlaid with the elevation profile (green). It helps visualize where energy was expended, typically on climbs.")
-            pdf.add_plotly_fig(_figures["power_profile"], "This chart displays your power output throughout the ride, with your Critical Power (CP) shown as an orange dashed line.")
-            
-            pdf.add_page()
-            pdf.chapter_title("Power Profile Analysis")
-            pdf.add_plotly_fig(_figures["power_zones"], "This chart breaks down the total time spent in each of the 7 power zones, providing an overview of the ride's intensity.")
-            pdf.add_plotly_fig(_figures["mmp_curve"], "This chart shows your highest average power for different durations, from 1 second to 1 hour. It is a key indicator of your fitness profile.")
-
-            pdf.add_page()
-            pdf.chapter_title("Interval Analysis")
-            pdf.add_plotly_fig(_figures["interval_analysis"], "This chart highlights your top 3 longest efforts above CP (red) and recovery periods below CP (blue), shown against your power and W'bal.")
-
-            return pdf.output(dest='S').encode('latin-1')
-
-        pdf_data = create_pdf_report(ride_info, metrics, figures)
+        st.header("Text Summary Report")
+        st.markdown("You can copy the text below to save or share your ride summary.")
         
-        st.download_button(
-            label="Generate & Download PDF Report",
-            data=pdf_data,
-            file_name=f"{uploaded_file.name.split('.')[0]}_report.pdf",
-            mime="application/pdf"
-        )
+        report_text = f"""
+        ## Ride Analysis Report
+        **Date:** {ride_info['start_time'].strftime('%d %b %Y') if ride_info['start_time'] else 'N/A'}
+        **Time of Day:** {get_time_of_day(ride_info['start_time'].hour) if ride_info['start_time'] else 'N/A'}
+
+        ### Overall Metrics
+        - **Total Distance:** {metrics['total_distance']} km
+        - **Average Power:** {metrics['avg_power_overall']} W
+        - **Average Speed:** {metrics['avg_speed_overall']} km/h
+
+        ### Power Analysis (CP: {CP} W)
+        - **Time Above CP:** {round(metrics['total_time_above'])} s
+        - **Avg Power Above CP:** {metrics['avg_power_above']} W
+        - **Time Below CP:** {round(metrics['total_time_below'])} s
+        - **Avg Power Below CP:** {metrics['avg_power_below']} W
+
+        ### Top 3 Efforts
+        {interval_analysis['above_summary'].to_markdown(index=False)}
+
+        ### Top 3 Recovery Periods
+        {interval_analysis['below_summary'].to_markdown(index=False)}
+        """
+        st.text_area("Copyable Report", report_text, height=400)
 
 
 elif not uploaded_file and analyze_button:
