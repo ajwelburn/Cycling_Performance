@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from typing import Tuple, List, Dict
 from datetime import datetime
+import requests
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -34,7 +35,6 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
             with fitdecode.FitReader(fit_file) as fit:
                 for frame in fit:
                     if frame.frame_type == fitdecode.FIT_FRAME_DATA and frame.name == "record":
-                        # Capture the start time from the first record
                         if start_time is None and frame.has_field("timestamp"):
                             start_time = frame.get_value("timestamp")
 
@@ -82,15 +82,38 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     return df, missing_power_count, start_time
 
 @st.cache_data
+def get_weather_data(lat: float, lon: float, start_time: datetime) -> Dict:
+    """Fetches historical weather data from Open-Meteo API."""
+    if lat is None or lon is None or start_time is None:
+        return None
+    
+    try:
+        date_str = start_time.strftime('%Y-%m-%d')
+        url = (
+            f"https://archive-api.open-meteo.com/v1/archive?latitude={lat:.4f}&longitude={lon:.4f}"
+            f"&start_date={date_str}&end_date={date_str}"
+            "&hourly=temperature_2m,relativehumidity_2m,windspeed_10m,winddirection_10m"
+        )
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            hour = start_time.hour
+            return {
+                "temperature": data['hourly']['temperature_2m'][hour],
+                "humidity": data['hourly']['relativehumidity_2m'][hour],
+                "wind_speed": data['hourly']['windspeed_10m'][hour],
+                "wind_direction": data['hourly']['winddirection_10m'][hour],
+            }
+    except Exception as e:
+        st.warning(f"Could not fetch weather data: {e}")
+    return None
+
+@st.cache_data
 def calculate_power_zones(power_data: pd.Series, cp: int) -> pd.DataFrame:
     """Calculates time spent in 7 power zones based on CP."""
     zones = {
-        "Z1 Active Recovery": (0, 0.55),
-        "Z2 Endurance": (0.55, 0.75),
-        "Z3 Tempo": (0.75, 0.90),
-        "Z4 Threshold": (0.90, 1.05),
-        "Z5 VO2 Max": (1.05, 1.20),
-        "Z6 Anaerobic": (1.20, 1.50),
+        "Z1 Active Recovery": (0, 0.55), "Z2 Endurance": (0.55, 0.75), "Z3 Tempo": (0.75, 0.90),
+        "Z4 Threshold": (0.90, 1.05), "Z5 VO2 Max": (1.05, 1.20), "Z6 Anaerobic": (1.20, 1.50),
         "Z7 Neuromuscular": (1.50, np.inf),
     }
     zone_counts = {name: 0 for name in zones}
@@ -100,34 +123,73 @@ def calculate_power_zones(power_data: pd.Series, cp: int) -> pd.DataFrame:
             if lower * cp < power <= upper * cp:
                 zone_counts[name] += 1
                 break
-    
     total_seconds = sum(zone_counts.values())
-    zone_data = []
-    for name, seconds in zone_counts.items():
-        percentage = (seconds / total_seconds) * 100 if total_seconds > 0 else 0
-        zone_data.append({"Zone": name, "Time (s)": seconds, "Percentage": percentage})
-        
+    zone_data = [{"Zone": name, "Time (s)": s, "Percentage": (s / total_seconds) * 100 if total_seconds > 0 else 0} for name, s in zone_counts.items()]
     return pd.DataFrame(zone_data)
 
 @st.cache_data
 def calculate_mmp_curve(power_data: pd.Series) -> pd.DataFrame:
     """Calculates the Mean Maximal Power (MMP) curve."""
     durations = [1, 5, 10, 30, 60, 120, 300, 600, 1200, 1800, 3600]
-    mmp = {}
-    for d in durations:
-        if len(power_data) >= d:
-            mmp[d] = power_data.rolling(window=d).mean().max()
-    
+    mmp = {d: power_data.rolling(window=d).mean().max() for d in durations if len(power_data) >= d}
     return pd.DataFrame(list(mmp.items()), columns=["Duration (s)", "Max Power (W)"])
+
+@st.cache_data
+def find_top_bouts(df: pd.DataFrame, cp: int, buffer_duration: int = 5) -> Tuple[List[Dict], List[Dict]]:
+    """Identifies the top 3 longest bouts above and below CP."""
+    bouts = []
+    current_bout = None
+    buffer = 0
+
+    for i in range(len(df)):
+        power = df['power'].iloc[i]
+        state = 'above' if power > cp else 'below'
+
+        if current_bout is None:
+            current_bout = {'state': state, 'start': i, 'end': i, 'duration': 1}
+            buffer = 0
+        elif state == current_bout['state']:
+            current_bout['end'] = i
+            current_bout['duration'] += 1
+            buffer = 0
+        else: # State has changed
+            buffer += 1
+            if buffer > buffer_duration:
+                bouts.append(current_bout)
+                current_bout = {'state': state, 'start': i, 'end': i, 'duration': 1}
+                buffer = 0
+    
+    if current_bout:
+        bouts.append(current_bout)
+
+    above_bouts = sorted([b for b in bouts if b['state'] == 'above'], key=lambda x: x['duration'], reverse=True)
+    below_bouts = sorted([b for b in bouts if b['state'] == 'below'], key=lambda x: x['duration'], reverse=True)
+
+    return above_bouts[:3], below_bouts[:3]
+
+@st.cache_data
+def analyze_bouts(df: pd.DataFrame, bouts: List[Dict], bout_type: str) -> pd.DataFrame:
+    """Analyzes a list of bouts and returns a summary DataFrame."""
+    summary = []
+    for i, bout in enumerate(bouts):
+        bout_df = df.iloc[bout['start']:bout['end']]
+        wbal_change = bout_df['Wbal'].iloc[0] - bout_df['Wbal'].iloc[-1]
+        summary.append({
+            "Bout": f"{bout_type} Bout {i+1}",
+            "Duration (s)": bout['duration'],
+            "Avg Power (W)": round(bout_df['power'].mean()),
+            "Avg Speed (km/h)": round(bout_df['speed_kmh'].mean(), 1),
+            "Avg Cadence (rpm)": round(bout_df['cadence'][bout_df['cadence'] > 0].mean()),
+            "W' Change (kJ)": round(wbal_change / 1000, 2)
+        })
+    return pd.DataFrame(summary)
+
 
 def get_time_of_day(hour: int) -> str:
     """Categorizes the hour into Morning, Afternoon, or Evening."""
-    if 5 <= hour < 12:
-        return "Morning"
-    elif 12 <= hour < 18:
-        return "Afternoon"
-    else:
-        return "Evening"
+    if 5 <= hour < 12: return "Morning"
+    elif 12 <= hour < 18: return "Afternoon"
+    else: return "Evening"
 
 # --- Main App Interface ---
 st.title("🚴 W' Balance and Time Trial Analysis Tool")
@@ -224,6 +286,12 @@ if analyze_button:
                 
                 power_zones_df = calculate_power_zones(df['power'], CP)
                 mmp_df = calculate_mmp_curve(df['power'])
+                top_above_bouts, top_below_bouts = find_top_bouts(df, CP)
+                above_bouts_summary = analyze_bouts(df, top_above_bouts, "Effort")
+                below_bouts_summary = analyze_bouts(df, top_below_bouts, "Recovery")
+                
+                first_coord = df[['position_lat', 'position_long']].dropna().iloc[0] if not df[['position_lat', 'position_long']].dropna().empty else None
+                weather_data = get_weather_data(first_coord['position_lat'], first_coord['position_long'], start_time) if first_coord is not None else None
 
                 st.session_state.results = {
                     "df": df,
@@ -241,12 +309,10 @@ if analyze_button:
                         "coasting_time": coasting_time,
                         "coasting_percent": round((coasting_time / sum(durations)) * 100) if sum(durations) > 0 else 0,
                     },
-                    "power_profile": {
-                        "zones": power_zones_df,
-                        "mmp": mmp_df
-                    },
+                    "power_profile": {"zones": power_zones_df, "mmp": mmp_df},
+                    "interval_analysis": {"above_bouts": top_above_bouts, "below_bouts": top_below_bouts, "above_summary": above_bouts_summary, "below_summary": below_bouts_summary},
                     "params": {"CP": CP, "WP": WP},
-                    "ride_info": {"start_time": start_time}
+                    "ride_info": {"start_time": start_time, "weather": weather_data}
                 }
     else:
         st.warning("Please upload a .fit file first.")
@@ -254,20 +320,14 @@ if analyze_button:
 # Display results if they exist in the session state
 if 'results' in st.session_state:
     results = st.session_state.results
-    df = results["df"]
-    metrics = results["metrics"]
-    params = results["params"]
-    power_profile = results["power_profile"]
-    ride_info = results["ride_info"]
+    df, metrics, params, power_profile, ride_info, interval_analysis = results.values()
     CP, WP = params["CP"], params["WP"]
     df['wbal_kj'] = df['Wbal'] / 1000
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Summary", "📈 Ride Profile", "⚡ Power Profile", "🗺️ Route Maps", "⚙️ Data Explorer"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Summary", "📈 Ride Profile", "⚡ Power Profile", "🏃 Interval Analysis", "🗺️ Route Maps", "⚙️ Data Explorer"])
 
     with tab1:
         st.header("Ride Summary")
-        
-        # --- Ride Conditions ---
         col1, col2 = st.columns(2)
         with col1:
             st.subheader("Ride Details")
@@ -275,16 +335,17 @@ if 'results' in st.session_state:
                 st.metric("Date", ride_info["start_time"].strftime("%d %b %Y"))
                 st.metric("Time of Day", get_time_of_day(ride_info["start_time"].hour))
         with col2:
-            st.subheader("Weather (Placeholder)")
-            st.info("A weather API integration is required for live data.")
-            temp = 22 # Placeholder
-            thermo_emoji = "☀️" if temp > 20 else "⛅"
-            st.metric(f"Temperature {thermo_emoji}", f"{temp}°C")
-            st.metric("Wind", "15 km/h NW")
+            st.subheader("Weather Conditions")
+            if ride_info["weather"]:
+                weather = ride_info["weather"]
+                temp = weather['temperature']
+                thermo_emoji = "🔥" if temp > 25 else "☀️" if temp > 18 else "⛅"
+                st.metric(f"Temperature {thermo_emoji}", f"{temp}°C")
+                st.metric("Wind", f"{weather['wind_speed']} km/h ({weather['wind_direction']}°)")
+            else:
+                st.info("No location data found to fetch weather.")
 
         st.divider()
-
-        # --- Overall Metrics ---
         st.subheader("Overall Ride Metrics")
         c1, c2, c3 = st.columns(3)
         c1.metric("Total Distance", f"{metrics['total_distance']} km")
@@ -292,7 +353,6 @@ if 'results' in st.session_state:
         c3.metric("Average Speed", f"{metrics['avg_speed_overall']} km/h")
         
         st.divider()
-
         st.header(f"Power Analysis (Threshold = {int(CP)} W)")
         col1, col2 = st.columns(2)
         with col1:
@@ -313,17 +373,17 @@ if 'results' in st.session_state:
         if 'altitude' in df.columns and df['altitude'].notna().any():
             fig_wbal.add_trace(go.Scatter(x=df['time'], y=df['altitude'], name='Elevation (m)', line=dict(color='#2ca02c', width=2), fill='tozeroy'), secondary_y=True)
         fig_wbal.update_layout(title_text='W\' Balance vs. Elevation', template='plotly_white', font=dict(color="black"))
-        fig_wbal.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
-        fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True, title_text="W'bal (kJ)", secondary_y=False); 
-        fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True, title_text="Elevation (m)", secondary_y=True)
+        fig_wbal.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
+        fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, title_text="W'bal (kJ)", secondary_y=False); 
+        fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, title_text="Elevation (m)", secondary_y=True)
         st.plotly_chart(fig_wbal, use_container_width=True)
 
         fig_power = go.Figure()
         fig_power.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='cyan', width=1)))
         fig_power.add_shape(type="line", x0=df['time'].min(), y0=CP, x1=df['time'].max(), y1=CP, line=dict(color="#ff7f0e", width=2, dash="dash"), name=f"CP ({CP}W)")
         fig_power.update_layout(title_text='Power over Time', template='plotly_white', font=dict(color="black"))
-        fig_power.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
-        fig_power.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
+        fig_power.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
+        fig_power.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
         st.plotly_chart(fig_power, use_container_width=True)
 
     with tab3:
@@ -331,8 +391,8 @@ if 'results' in st.session_state:
         zones_df = power_profile["zones"]
         fig_zones = go.Figure(go.Bar(x=zones_df['Time (s)'], y=zones_df['Zone'], orientation='h', text=zones_df['Percentage'].apply(lambda x: f'{x:.1f}%')))
         fig_zones.update_layout(title_text='Time in Power Zones', template='plotly_white', font=dict(color="black"))
-        fig_zones.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
-        fig_zones.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
+        fig_zones.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
+        fig_zones.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
         st.plotly_chart(fig_zones, use_container_width=True)
         
         mmp_df = power_profile["mmp"]
@@ -344,16 +404,37 @@ if 'results' in st.session_state:
                                 tickvals = [1, 5, 10, 30, 60, 120, 300, 600, 1200, 1800, 3600],
                                 ticktext = ['1s', '5s', '10s', '30s', '1m', '2m', '5m', '10m', '20m', '30m', '60m']
                             ))
-        fig_mmp.update_xaxes(title_text='Duration (log scale)', showline=True, linewidth=2, linecolor='black', mirror=True)
-        fig_mmp.update_yaxes(title_text='Max Power (W)', showline=True, linewidth=2, linecolor='black', mirror=True)
+        fig_mmp.update_xaxes(title_text='Duration (log scale)', showline=True, linewidth=2, linecolor='black', mirror=False)
+        fig_mmp.update_yaxes(title_text='Max Power (W)', showline=True, linewidth=2, linecolor='black', mirror=False)
         st.plotly_chart(fig_mmp, use_container_width=True)
 
     with tab4:
+        st.header("Interval Analysis")
+        fig_intervals = make_subplots(specs=[[{"secondary_y": True}]])
+        fig_intervals.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='grey', width=1)), secondary_y=False)
+        fig_intervals.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=True)
+        
+        for bout in interval_analysis['above_bouts']:
+            fig_intervals.add_vrect(x0=df['time'].iloc[bout['start']], x1=df['time'].iloc[bout['end']], fillcolor="red", opacity=0.2, layer="below", line_width=0)
+        for bout in interval_analysis['below_bouts']:
+            fig_intervals.add_vrect(x0=df['time'].iloc[bout['start']], x1=df['time'].iloc[bout['end']], fillcolor="blue", opacity=0.2, layer="below", line_width=0)
+
+        fig_intervals.update_layout(title_text='Top Bouts vs. Power and W\'bal', template='plotly_white', font=dict(color="black"))
+        fig_intervals.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
+        fig_intervals.update_yaxes(title_text="Power (W)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False)
+        fig_intervals.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
+        st.plotly_chart(fig_intervals, use_container_width=True)
+
+        st.subheader("Top 3 Efforts (>CP)")
+        st.dataframe(interval_analysis['above_summary'])
+        st.subheader("Top 3 Recovery Bouts (<=CP)")
+        st.dataframe(interval_analysis['below_summary'])
+
+    with tab5:
         st.header("Route Maps")
         if 'position_lat' in df.columns and 'position_long' in df.columns and not df[['position_lat', 'position_long']].dropna().empty:
             gps_df = df[['position_lat', 'position_long', 'Wbal', 'power', 'speed_kmh']].dropna().copy()
             
-            # --- W'bal Map ---
             st.subheader("Route Colored by W' Balance (%)")
             gps_df['Wbal_percent'] = (gps_df['Wbal'] / WP) * 100
             gps_df['Wbal_percent'] = gps_df['Wbal_percent'].clip(0, 100)
@@ -367,42 +448,11 @@ if 'results' in st.session_state:
             wbal_colormap.caption = "W' Balance (%)"
             m_wbal.add_child(wbal_colormap)
             st_folium(m_wbal, width=1400, height=500)
-
-            # --- Power vs CP Map ---
-            st.subheader("Route Colored by Power vs. CP")
-            power_diff = gps_df['power'] - CP
-            norm_power = np.clip(power_diff, -150, 150)
-            power_colormap = cm.LinearColormap(colors=['blue', 'white', 'red'], vmin=-150, vmax=150)
-            m_power = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB positron')
-            for i in range(len(gps_df) - 1):
-                p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
-                          gps_df[['position_lat', 'position_long']].iloc[i+1].values)
-                avg_norm_power = (norm_power.iloc[i] + norm_power.iloc[i+1]) / 2
-                folium.PolyLine([p1, p2], color=power_colormap(avg_norm_power), weight=5).add_to(m_power)
-            power_colormap.caption = "Power relative to CP (Watts)"
-            m_power.add_child(power_colormap)
-            st_folium(m_power, width=1400, height=500)
-
-            # --- Speed Map ---
-            st.subheader("Route Colored by Speed (km/h)")
-            min_speed, max_speed = gps_df['speed_kmh'].min(), gps_df['speed_kmh'].max()
-            speed_colormap = cm.LinearColormap(colors=['yellow', 'orange', 'red'], vmin=min_speed, vmax=max_speed)
-            m_speed = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB positron')
-            for i in range(len(gps_df) - 1):
-                p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
-                          gps_df[['position_lat', 'position_long']].iloc[i+1].values)
-                avg_speed = (gps_df['speed_kmh'].iloc[i] + gps_df['speed_kmh'].iloc[i+1]) / 2
-                folium.PolyLine([p1, p2], color=speed_colormap(avg_speed), weight=5).add_to(m_speed)
-            speed_colormap.caption = "Speed (km/h)"
-            m_speed.add_child(speed_colormap)
-            st_folium(m_speed, width=1400, height=500)
         else:
             st.warning("No GPS data found in the file to generate maps.")
 
-    with tab5:
+    with tab6:
         st.header("Interactive Data Explorer")
-        
-        # Determine available data streams
         available_metrics = ['Power', 'Speed (km/h)']
         if 'cadence' in df.columns and df['cadence'].sum() > 0: available_metrics.append('Cadence')
         if 'heart_rate' in df.columns and df['heart_rate'].sum() > 0: available_metrics.append('Heart Rate')
@@ -413,8 +463,6 @@ if 'results' in st.session_state:
 
         if selected_metrics:
             fig_explorer = make_subplots(specs=[[{"secondary_y": True}]])
-            
-            # Define which axis each metric belongs to
             axis_map = {'Power': 'left', 'Altitude': 'left', 'Speed (km/h)': 'right', 'Cadence': 'right', 'Heart Rate': 'right'}
             
             for metric in selected_metrics:
@@ -424,9 +472,9 @@ if 'results' in st.session_state:
                 fig_explorer.add_trace(go.Scatter(x=df['time'], y=smoothed_data, name=metric), secondary_y=is_secondary)
             
             fig_explorer.update_layout(title_text='Data Explorer', template='plotly_white', font=dict(color="black"))
-            fig_explorer.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
-            fig_explorer.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True, secondary_y=False)
-            fig_explorer.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True, secondary_y=True)
+            fig_explorer.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
+            fig_explorer.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False)
+            fig_explorer.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
             st.plotly_chart(fig_explorer, use_container_width=True)
 
 elif not uploaded_file and analyze_button:
