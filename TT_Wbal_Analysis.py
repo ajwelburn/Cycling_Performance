@@ -10,9 +10,7 @@ from streamlit_folium import st_folium
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from typing import Tuple, List, Dict
-from datetime import datetime
-import requests
-from fpdf import FPDF
+from datetime import datetime, time
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -173,21 +171,33 @@ def find_top_bouts(df: pd.DataFrame, cp: int, buffer_duration: int = 5) -> Tuple
     return above_bouts[:3], below_bouts[:3]
 
 @st.cache_data
-def analyze_bouts(df: pd.DataFrame, bouts: List[Dict], bout_type: str) -> pd.DataFrame:
+def analyze_bouts(df: pd.DataFrame, bouts: List[Dict], bout_type: str, cp: int) -> pd.DataFrame:
     """Analyzes a list of bouts and returns a summary DataFrame."""
     summary = []
     for i, bout in enumerate(bouts):
         bout_df = df.iloc[bout['start']:bout['end']]
         if bout_df.empty: continue
-        wbal_change = bout_df['Wbal'].iloc[0] - bout_df['Wbal'].iloc[-1]
-        summary.append({
+        
+        # Correctly calculate W' change: positive for recovery, negative for depletion
+        wbal_change = bout_df['Wbal'].iloc[-1] - bout_df['Wbal'].iloc[0]
+        
+        bout_summary = {
             "Bout": f"{bout_type} Bout {i+1}",
             "Duration (s)": bout['duration'],
             "Avg Power (W)": round(bout_df['power'].mean()),
             "Avg Speed (km/h)": round(bout_df['speed_kmh'].mean(), 1),
             "Avg Cadence (rpm)": round(bout_df['cadence'][bout_df['cadence'] > 0].mean()),
             "W' Change (kJ)": round(wbal_change / 1000, 2)
-        })
+        }
+        
+        # Add context-specific power metric
+        if bout_type == "Effort":
+            bout_summary["Avg Power > CP (W)"] = round(bout_df['power'].mean() - cp)
+        else: # Recovery
+            bout_summary["Avg Power < CP (W)"] = round(cp - bout_df['power'].mean())
+
+        summary.append(bout_summary)
+        
     return pd.DataFrame(summary)
 
 
@@ -293,8 +303,8 @@ if analyze_button:
                 power_zones_df = calculate_power_zones(df['power'], CP)
                 mmp_df = calculate_mmp_curve(df['power'])
                 top_above_bouts, top_below_bouts = find_top_bouts(df, CP)
-                above_bouts_summary = analyze_bouts(df, top_above_bouts, "Effort")
-                below_bouts_summary = analyze_bouts(df, top_below_bouts, "Recovery")
+                above_bouts_summary = analyze_bouts(df, top_above_bouts, "Effort", CP)
+                below_bouts_summary = analyze_bouts(df, top_below_bouts, "Recovery", CP)
                 
                 first_coord = df[['position_lat', 'position_long']].dropna().iloc[0] if not df[['position_lat', 'position_long']].dropna().empty else None
                 weather_data = get_weather_data(first_coord['position_lat'], first_coord['position_long'], start_time) if first_coord is not None else None
@@ -345,6 +355,8 @@ if 'results' in st.session_state:
             if ride_info["start_time"]:
                 st.metric("Date", ride_info["start_time"].strftime("%d %b %Y"))
                 st.metric("Time of Day", get_time_of_day(ride_info["start_time"].hour))
+            else:
+                st.info("No start time found in file.")
         with col2:
             st.subheader("Weather Conditions")
             if ride_info["weather"]:
@@ -539,8 +551,13 @@ if 'results' in st.session_state:
             pdf.set_font('Arial', 'B', 12)
             pdf.cell(0, 10, 'Key Metrics', 0, 1, 'L')
             pdf.set_font('Arial', '', 10)
+            
+            date_str = "Date not available"
+            if _ride_info and _ride_info.get("start_time") and isinstance(_ride_info["start_time"], datetime):
+                date_str = _ride_info['start_time'].strftime('%d %b %Y')
+
             pdf.multi_cell(0, 5, 
-                f"Date: {_ride_info['start_time'].strftime('%d %b %Y')}\n"
+                f"Date: {date_str}\n"
                 f"Total Distance: {_metrics['total_distance']} km\n"
                 f"Average Power: {_metrics['avg_power_overall']} W\n"
                 f"Average Speed: {_metrics['avg_speed_overall']} km/h"
