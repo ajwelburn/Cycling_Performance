@@ -279,7 +279,7 @@ if 'results' in st.session_state:
         st.plotly_chart(fig_wbal, use_container_width=True)
 
         fig_power = go.Figure()
-        fig_power.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='lightgrey', width=0.5)))
+        fig_power.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='cyan', width=1)))
         fig_power.add_shape(type="line", x0=df['time'].min(), y0=CP, x1=df['time'].max(), y1=CP, line=dict(color="#ff7f0e", width=2, dash="dash"), name=f"CP ({CP}W)")
         fig_power.update_layout(title_text='Power over Time', template='plotly_dark')
         st.plotly_chart(fig_power, use_container_width=True)
@@ -313,7 +313,7 @@ if 'results' in st.session_state:
             gps_df['Wbal_percent'] = gps_df['Wbal_percent'].clip(0, 100)
             # FIX: Using a valid, high-contrast colormap name in lowercase
             wbal_colormap = cm.linear.viridis.scale(0, 100)
-            m_wbal = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB dark_matter')
+            m_wbal = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB positron')
             for i in range(len(gps_df) - 1):
                 p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
                           gps_df[['position_lat', 'position_long']].iloc[i+1].values)
@@ -322,6 +322,33 @@ if 'results' in st.session_state:
             wbal_colormap.caption = "W' Balance (%)"
             m_wbal.add_child(wbal_colormap)
             st_folium(m_wbal, width=1400, height=500)
+
+            st.subheader("Route Colored by Power vs. CP")
+            power_diff = gps_df['power'] - CP
+            norm_power = np.clip(power_diff, -150, 150)
+            power_colormap = cm.linear.coolwarm.scale(-150, 150)
+            m_power = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB positron')
+            for i in range(len(gps_df) - 1):
+                p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
+                          gps_df[['position_lat', 'position_long']].iloc[i+1].values)
+                avg_norm_power = (norm_power.iloc[i] + norm_power.iloc[i+1]) / 2
+                folium.PolyLine([p1, p2], color=power_colormap(avg_norm_power), weight=5).add_to(m_power)
+            power_colormap.caption = "Power relative to CP (Watts)"
+            m_power.add_child(power_colormap)
+            st_folium(m_power, width=1400, height=500)
+            
+            st.subheader("Route Colored by Speed (km/h)")
+            min_speed, max_speed = gps_df['speed_kmh'].min(), gps_df['speed_kmh'].max()
+            speed_colormap = cm.linear.inferno.scale(min_speed, max_speed)
+            m_speed = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB positron')
+            for i in range(len(gps_df) - 1):
+                p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
+                          gps_df[['position_lat', 'position_long']].iloc[i+1].values)
+                avg_speed = (gps_df['speed_kmh'].iloc[i] + gps_df['speed_kmh'].iloc[i+1]) / 2
+                folium.PolyLine([p1, p2], color=speed_colormap(avg_speed), weight=5).add_to(m_speed)
+            speed_colormap.caption = "Speed (km/h)"
+            m_speed.add_child(speed_colormap)
+            st_folium(m_speed, width=1400, height=500)
         else:
             st.warning("No GPS data found in the file to generate maps.")
 
