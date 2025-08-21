@@ -1,3 +1,4 @@
+import streamlit as st
 import pandas as pd
 import math as m
 import matplotlib.pyplot as plt
@@ -7,34 +8,39 @@ import io
 import folium
 import branca.colormap as cm
 from folium.features import ColorLine
+from streamlit_folium import st_folium
 from typing import Tuple, List
-#pray it uploads the fit file 
-def parse_fit_file(file_path: str) -> Tuple[pd.DataFrame, int, List[int]]:
-    """
-    Parses a .fit file into a pandas DataFrame, handling missing data.
 
-    Returns:
-        A tuple containing:
-        - The parsed DataFrame.
-        - The count of missing power data points.
-        - A list of time points (in seconds) where power was missing.
+# --- Page Configuration ---
+st.set_page_config(
+    page_title="W'bal Analysis Tool",
+    page_icon="🚴",
+    layout="wide"
+)
+
+# --- 1. FIT FILE PARSING FUNCTION (Cached for performance) ---
+@st.cache_data
+def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, List[int]]:
+    """
+    Parses the in-memory .fit file content into a pandas DataFrame.
     """
     records = []
     try:
-        with fitdecode.FitReader(file_path) as fit:
-            for frame in fit:
-                if frame.frame_type == fitdecode.FIT_FRAME_DATA and frame.name == "record":
-                    record_data = {
-                        "timestamp": frame.get_value("timestamp", fallback=None),
-                        "power": frame.get_value("power", fallback=None),
-                        "cadence": frame.get_value("cadence", fallback=None),
-                        "position_lat": frame.get_value("position_lat", fallback=None),
-                        "position_long": frame.get_value("position_long", fallback=None),
-                    }
-                    if record_data["timestamp"] is not None:
-                        records.append(record_data)
+        with io.BytesIO(file_content) as fit_file:
+            with fitdecode.FitReader(fit_file) as fit:
+                for frame in fit:
+                    if frame.frame_type == fitdecode.FIT_FRAME_DATA and frame.name == "record":
+                        record_data = {
+                            "timestamp": frame.get_value("timestamp", fallback=None),
+                            "power": frame.get_value("power", fallback=None),
+                            "cadence": frame.get_value("cadence", fallback=None),
+                            "position_lat": frame.get_value("position_lat", fallback=None),
+                            "position_long": frame.get_value("position_long", fallback=None),
+                        }
+                        if record_data["timestamp"] is not None:
+                            records.append(record_data)
     except fitdecode.FitDecodeError as e:
-        print(f"Error decoding .fit file: {e}")
+        st.error(f"Error decoding .fit file: {e}")
         return pd.DataFrame(), 0, []
 
     if not records:
@@ -42,7 +48,6 @@ def parse_fit_file(file_path: str) -> Tuple[pd.DataFrame, int, List[int]]:
 
     df = pd.DataFrame(records)
     
-    # Convert Garmin's semicircles to degrees for GPS coordinates
     if 'position_lat' in df.columns:
         df['position_lat'] = df['position_lat'] * (180 / 2**31) if df['position_lat'].notnull().any() else np.nan
     if 'position_long' in df.columns:
@@ -66,221 +71,249 @@ def parse_fit_file(file_path: str) -> Tuple[pd.DataFrame, int, List[int]]:
 
     return df, missing_count, missing_times
 
+# --- Main App Interface ---
+st.title("🚴 W' Balance and Time Trial Analysis Tool")
+st.markdown("""
+Upload your `.fit` file and input your physiological parameters to analyze your ride.
+The tool calculates your W' balance, provides detailed power and cadence metrics,
+and visualizes your effort on charts and interactive maps.
+""")
 
-# --- 2. LOAD DATA & GET USER INPUTS ---
-try:
-    # TODO: Replace this with a file uploader in your Streamlit app
-    file_path = 'your_activity.fit' # <--- CHANGE THIS TO YOUR .FIT FILE
-    df, missing_power_count, missing_power_times = parse_fit_file(file_path)
+# --- Sidebar for Inputs ---
+with st.sidebar:
+    st.header("1. Upload Activity File")
+    uploaded_file = st.file_uploader("Choose a .fit file", type="fit")
+    
+    st.header("2. Input Parameters")
+    # Using session state to remember values
+    if 'A' not in st.session_state: st.session_state.A = 339.3
+    if 'B' not in st.session_state: st.session_state.B = -0.789
+    if 'CP' not in st.session_state: st.session_state.CP = 350
+    if 'WP' not in st.session_state: st.session_state.WP = 20000
+
+    A = st.number_input('Tau Constant (A)', value=st.session_state.A, format="%.3f")
+    B = st.number_input('Tau Constant (B)', value=st.session_state.B, format="%.3f")
+    CP = st.number_input('Critical Power (CP) in Watts', value=st.session_state.CP, step=1)
+    WP = st.number_input('W\' (W prime) in Joules', value=st.session_state.WP, step=100)
+
+    analyze_button = st.button("Analyze Ride", type="primary")
+
+# --- Main Panel for Outputs ---
+if uploaded_file and analyze_button:
+    # --- 2. DATA PROCESSING ---
+    file_content = uploaded_file.getvalue()
+    df, missing_power_count, missing_power_times = parse_fit_file(file_content)
 
     if df.empty:
-        raise ValueError("Failed to parse .fit file or the file contains no valid records.")
-
-    print("Data loaded successfully from .fit file. Columns found:", df.columns.tolist())
-
-    if missing_power_count > 0:
-        print(f"\nNOTE: Found and replaced {missing_power_count} missing power data point(s) with 0.")
-        if len(missing_power_times) > 10:
-            print(f"      Occurred at times (seconds): {missing_power_times[:10]}... and more.")
-        else:
-            print(f"      Occurred at times (seconds): {missing_power_times}")
-
-    # TODO: Replace these with Streamlit input widgets
-    A = float(input('\nEnter Tau calculation constant A (e.g., 339.3): '))
-    B = float(input('Enter Tau calculation constant B (e.g., -0.789): '))
-    CP = int(input('Enter Critical Power (CP) in Watts (e.g., 350): '))
-    WP = int(input('Enter W\' (W prime) in Joules (e.g., 20000): '))
-
-except FileNotFoundError:
-    print(f"Error: The file was not found at '{file_path}'. Please update the 'file_path' variable.")
-    exit()
-except ValueError as e:
-    print(f"Error: {e}")
-    exit()
-except Exception as e:
-    print(f"An unexpected error occurred: {e}")
-    exit()
-
-
-# --- 3. W'bal CALCULATION ---
-print("\nCalculating W' balance...")
-Wbal = WP
-Wbal_old = WP
-Wexp = 0
-df['DCP'] = CP - df['power']
-df['Wbal'] = float(WP)
-df['Tau'] = 0.0
-df['Wexp'] = 0.0
-df['Rec'] = 0.0
-
-for i in range(1, len(df)):
-    P = df.at[i, 'power']
-    if P > CP:
-        Wbal = Wbal - (P - CP)
-        Tau = 0.0
+        st.error("Could not parse the .fit file. It might be empty or corrupted.")
     else:
-        DCP2 = CP - P
-        Tau = A * (DCP2 ** B) if DCP2 > 0 else 0
-        Wbal = WP - (Wexp * m.exp(-1 / Tau)) if Tau > 0 else Wbal
-    Wbal = max(0, min(WP, Wbal))
-    Wexp = WP - Wbal
-    Rec = Wbal - Wbal_old
-    df.at[i, 'Wbal'] = Wbal
-    df.at[i, 'Tau'] = Tau
-    df.at[i, 'Wexp'] = Wexp
-    df.at[i, 'Rec'] = Rec
-    Wbal_old = Wbal
+        st.success(f"Successfully loaded and parsed the .fit file. Found {len(df)} data records.")
+        if missing_power_count > 0:
+            st.warning(f"Found and replaced {missing_power_count} missing power data point(s) with 0.")
 
-output_file_path = 'activity-results.xlsx'
-df.to_excel(output_file_path, index=False)
-print(f"W'bal calculation complete. Results saved to {output_file_path}")
+        # --- 3. W'bal CALCULATION ---
+        with st.spinner("Calculating W' balance..."):
+            Wbal = float(WP)
+            Wbal_old = float(WP)
+            Wexp = 0.0
+            
+            # Pre-allocate columns for performance
+            wbal_list, tau_list, wexp_list, rec_list = [0.0]*len(df), [0.0]*len(df), [0.0]*len(df), [0.0]*len(df)
+            wbal_list[0] = float(WP)
 
+            power_np = df['power'].to_numpy()
 
-# --- 4. POWER AND CADENCE ANALYSIS ---
-print("\nPerforming Power and Cadence Analysis...")
-time_values = df['time'].tolist()
-power_values = df['power'].tolist()
-cadence_values = df['cadence'].tolist()
-durations = [0] + [(time_values[i] - time_values[i-1]) for i in range(1, len(time_values))]
-if sum(durations) == 0 or len(durations) != len(time_values):
-    durations = [1] * len(time_values)
-total_time_above, total_work_above, total_time_below, total_work_below = 0, 0, 0, 0
-bouts_above, bouts_below = 0, 0
-previous_state = 'below' if power_values[0] <= CP else 'above'
-cadence_sum, cadence_count, cadence_above_sum, cadence_above_count = 0, 0, 0, 0
-cadence_below_sum, cadence_below_count, coasting_time = 0, 0, 0
-for i in range(len(power_values)):
-    dur, powr, cad = durations[i], power_values[i], cadence_values[i]
-    current_state = 'above' if powr > CP else 'below'
-    if cad == 0: coasting_time += dur
-    else:
-        cadence_sum += cad * dur
-        cadence_count += dur
-        if current_state == 'above':
-            cadence_above_sum += cad * dur
-            cadence_above_count += dur
-        else:
-            cadence_below_sum += cad * dur
-            cadence_below_count += dur
-    if current_state != previous_state:
-        if current_state == 'above': bouts_above += 1
-        else: bouts_below += 1
-        previous_state = current_state
-    if current_state == 'above':
-        total_time_above += dur
-        total_work_above += powr * dur
-    else:
-        total_time_below += dur
-        total_work_below += powr * dur
-avg_power_above = round(total_work_above / total_time_above) if total_time_above > 0 else 0
-avg_power_below = round(total_work_below / total_time_below) if total_time_below > 0 else 0
-avg_time_per_bout_above = round(total_time_above / bouts_above) if bouts_above > 0 else 0
-avg_time_per_bout_below = round(total_time_below / bouts_below) if bouts_below > 0 else 0
-avg_cadence = round(cadence_sum / cadence_count) if cadence_count > 0 else 0
-avg_cadence_above = round(cadence_above_sum / cadence_above_count) if cadence_above_count > 0 else 0
-avg_cadence_below = round(cadence_below_sum / cadence_below_count) if cadence_below_count > 0 else 0
-total_time = sum(durations)
-coasting_percent = round((coasting_time / total_time) * 100) if total_time > 0 else 0
+            for i in range(1, len(df)):
+                P = power_np[i]
+                if P > CP:
+                    Wbal -= (P - CP)
+                    Tau = 0.0
+                else:
+                    DCP2 = CP - P
+                    Tau = A * (DCP2 ** B) if DCP2 > 0 else 0
+                    Wbal = WP - (Wexp * m.exp(-1 / Tau)) if Tau > 0 else Wbal
+                
+                Wbal = max(0, min(WP, Wbal))
+                Wexp = WP - Wbal
+                Rec = Wbal - Wbal_old
 
+                wbal_list[i] = Wbal
+                tau_list[i] = Tau
+                wexp_list[i] = Wexp
+                rec_list[i] = Rec
+                Wbal_old = Wbal
+            
+            df['Wbal'], df['Tau'], df['Wexp'], df['Rec'] = wbal_list, tau_list, wexp_list, rec_list
 
-# --- 5. CONSOLE OUTPUT ---
-print(f"\n--- RESULTS (Threshold = {int(CP)} W) ---")
-print(f"Time Above: {round(total_time_above)}s | Avg Power: {avg_power_above}W | Bouts: {bouts_above} | Avg Time/Bout: {avg_time_per_bout_above}s")
-print(f"Time Below: {round(total_time_below)}s | Avg Power: {avg_power_below}W | Bouts: {bouts_below} | Avg Time/Bout: {avg_time_per_bout_below}s")
-print("\n--- CADENCE STATISTICS (excluding coasting) ---")
-print(f"Avg Cadence Overall: {avg_cadence} rpm")
-print(f"Avg Cadence >CP: {avg_cadence_above} rpm")
-print(f"Avg Cadence <=CP: {avg_cadence_below} rpm")
-print(f"Total Coasting Time (Cadence=0): {round(coasting_time)}s ({coasting_percent}%)")
+        # --- 4. POWER AND CADENCE ANALYSIS ---
+        with st.spinner("Analyzing power and cadence data..."):
+            time_values = df['time'].tolist()
+            power_values = df['power'].tolist()
+            cadence_values = df['cadence'].tolist()
+            durations = [0] + [(time_values[i] - time_values[i-1]) for i in range(1, len(time_values))]
+            if sum(durations) == 0 or len(durations) != len(time_values):
+                durations = [1] * len(time_values)
+            
+            total_time_above, total_work_above, total_time_below, total_work_below = 0, 0, 0, 0
+            bouts_above, bouts_below = 0, 0
+            previous_state = 'below' if power_values[0] <= CP else 'above'
+            cadence_sum, cadence_count, cadence_above_sum, cadence_above_count = 0, 0, 0, 0
+            cadence_below_sum, cadence_below_count, coasting_time = 0, 0, 0
+            
+            for i in range(len(power_values)):
+                dur, powr, cad = durations[i], power_values[i], cadence_values[i]
+                current_state = 'above' if powr > CP else 'below'
+                if cad == 0: coasting_time += dur
+                else:
+                    cadence_sum += cad * dur
+                    cadence_count += dur
+                    if current_state == 'above':
+                        cadence_above_sum += cad * dur
+                        cadence_above_count += dur
+                    else:
+                        cadence_below_sum += cad * dur
+                        cadence_below_count += dur
+                if current_state != previous_state:
+                    if current_state == 'above': bouts_above += 1
+                    else: bouts_below += 1
+                    previous_state = current_state
+                if current_state == 'above':
+                    total_time_above += dur
+                    total_work_above += powr * dur
+                else:
+                    total_time_below += dur
+                    total_work_below += powr * dur
 
+            avg_power_above = round(total_work_above / total_time_above) if total_time_above > 0 else 0
+            avg_power_below = round(total_work_below / total_time_below) if total_time_below > 0 else 0
+            avg_time_per_bout_above = round(total_time_above / bouts_above) if bouts_above > 0 else 0
+            avg_time_per_bout_below = round(total_time_below / bouts_below) if bouts_below > 0 else 0
+            avg_cadence = round(cadence_sum / cadence_count) if cadence_count > 0 else 0
+            avg_cadence_above = round(cadence_above_sum / cadence_above_count) if cadence_above_count > 0 else 0
+            avg_cadence_below = round(cadence_below_sum / cadence_below_count) if cadence_below_count > 0 else 0
+            total_time = sum(durations)
+            coasting_percent = round((coasting_time / total_time) * 100) if total_time > 0 else 0
 
-# --- 6. VISUALIZATIONS ---
-print("\nGenerating plots...")
-# PLOT 1: W' Balance Over Time
-plt.figure(figsize=(15, 7))
-plt.plot(df['time'], df['Wbal'], label='W\'bal', color='purple', linewidth=2)
-plt.xlabel('Time (s)'), plt.ylabel('W\'bal (Joules)'), plt.title('W\' Balance Over Time')
-plt.grid(True, linestyle='--', alpha=0.6), plt.legend(), plt.tight_layout(), plt.show()
+        # --- 5. DISPLAY OUTPUTS IN TABS ---
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 Summary Metrics", "📈 Charts", "🗺️ Route Maps", "📋 Raw Data"])
 
-# PLOT 2: Summary Bar Plots
-labels, time_data = ['Above CP', 'Below CP'], [round(total_time_above), round(total_time_below)]
-avg_power_data, bouts_data = [avg_power_above, avg_power_below], [bouts_above, bouts_below]
-avg_bout_time = [avg_time_per_bout_above, avg_time_per_bout_below]
-fig, axs = plt.subplots(1, 4, figsize=(18, 5))
-fig.suptitle(f"Power Data Summary (Threshold = {int(CP)} W)", fontsize=16)
-axs[0].bar(labels, time_data, color=['#d62728', '#1f77b4']), axs[0].set_title("Total Time (s)"), axs[0].set_ylabel("Seconds")
-axs[1].bar(labels, avg_power_data, color=['#d62728', '#1f77b4']), axs[1].set_title("Average Power (W)"), axs[1].set_ylabel("Watts")
-axs[2].bar(labels, bouts_data, color=['#d62728', '#1f77b4']), axs[2].set_title("Number of Bouts"), axs[2].set_ylabel("Count")
-axs[3].bar(labels, avg_bout_time, color=['#d62728', '#1f77b4']), axs[3].set_title("Avg Time per Bout (s)"), axs[3].set_ylabel("Seconds")
-plt.tight_layout(rect=[0, 0.03, 1, 0.95]), plt.show()
+        with tab1:
+            st.header(f"Summary Metrics (Threshold = {int(CP)} W)")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("Above CP")
+                c1, c2 = st.columns(2)
+                c1.metric("Total Time", f"{round(total_time_above)} s")
+                c2.metric("Avg Power", f"{avg_power_above} W")
+                c1.metric("Number of Bouts", f"{bouts_above}")
+                c2.metric("Avg Time/Bout", f"{avg_time_per_bout_above} s")
+            with col2:
+                st.subheader("Below CP")
+                c1, c2 = st.columns(2)
+                c1.metric("Total Time", f"{round(total_time_below)} s")
+                c2.metric("Avg Power", f"{avg_power_below} W")
+                c1.metric("Number of Bouts", f"{bouts_below}")
+                c2.metric("Avg Time/Bout", f"{avg_time_per_bout_below} s")
+            
+            st.divider()
+            st.subheader("Cadence Statistics (excluding coasting)")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Avg Cadence Overall", f"{avg_cadence} rpm")
+            c2.metric("Avg Cadence >CP", f"{avg_cadence_above} rpm")
+            c3.metric("Avg Cadence <=CP", f"{avg_cadence_below} rpm")
+            st.metric("Total Coasting Time (Cadence=0)", f"{round(coasting_time)}s ({coasting_percent}%)")
 
-# PLOT 3: Power Over Time
-plt.figure(figsize=(15, 7)), plt.title("Power over Time with Threshold Coloring", fontsize=16)
-plt.xlabel("Time (s)"), plt.ylabel("Power (W)")
-plt.fill_between(df['time'], df['power'], CP, where=df['power'] <= CP, color='#1f77b4', alpha=0.5, interpolate=True)
-plt.fill_between(df['time'], df['power'], CP, where=df['power'] > CP, color='#d62728', alpha=0.5, interpolate=True)
-plt.plot(df['time'], df['power'], color='black', linewidth=0.5, label='Power')
-plt.axhline(y=CP, color='orange', linestyle='--', label=f"CP = {int(CP)} W")
-plt.legend(), plt.grid(True, linestyle='--', alpha=0.6), plt.tight_layout(), plt.show()
+        with tab2:
+            st.header("Charts")
+            # PLOT 1: W' Balance Over Time
+            fig1, ax1 = plt.subplots(figsize=(15, 7))
+            ax1.plot(df['time'], df['Wbal'], label='W\'bal', color='purple', linewidth=2)
+            ax1.set_xlabel('Time (s)'), ax1.set_ylabel('W\'bal (Joules)'), ax1.set_title('W\' Balance Over Time')
+            ax1.grid(True, linestyle='--', alpha=0.6), ax1.legend()
+            st.pyplot(fig1)
 
-# PLOT 4: Power vs. Cadence Heatmap
-pedaling_df = df[df['cadence'] > 0]
-if not pedaling_df.empty:
-    plt.figure(figsize=(10, 6))
-    hb = plt.hexbin(pedaling_df['cadence'], pedaling_df['power'], gridsize=50, cmap='viridis', mincnt=1)
-    plt.colorbar(hb, label='Frequency of Occurrence')
-    plt.xlabel("Cadence (rpm)"), plt.ylabel("Power (W)"), plt.title("Power vs. Cadence Density")
-    plt.grid(True, linestyle='--', alpha=0.6), plt.tight_layout(), plt.show()
+            # PLOT 2: Summary Bar Plots
+            labels, time_data = ['Above CP', 'Below CP'], [round(total_time_above), round(total_time_below)]
+            avg_power_data, bouts_data = [avg_power_above, avg_power_below], [bouts_above, bouts_below]
+            avg_bout_time = [avg_time_per_bout_above, avg_time_per_bout_below]
+            fig2, axs = plt.subplots(1, 4, figsize=(18, 5))
+            fig2.suptitle(f"Power Data Summary (Threshold = {int(CP)} W)", fontsize=16)
+            axs[0].bar(labels, time_data, color=['#d62728', '#1f77b4']), axs[0].set_title("Total Time (s)"), axs[0].set_ylabel("Seconds")
+            axs[1].bar(labels, avg_power_data, color=['#d62728', '#1f77b4']), axs[1].set_title("Average Power (W)"), axs[1].set_ylabel("Watts")
+            axs[2].bar(labels, bouts_data, color=['#d62728', '#1f77b4']), axs[2].set_title("Number of Bouts"), axs[2].set_ylabel("Count")
+            axs[3].bar(labels, avg_bout_time, color=['#d62728', '#1f77b4']), axs[3].set_title("Avg Time per Bout (s)"), axs[3].set_ylabel("Seconds")
+            plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+            st.pyplot(fig2)
+
+            # PLOT 3: Power Over Time
+            fig3, ax3 = plt.subplots(figsize=(15, 7))
+            ax3.set_title("Power over Time with Threshold Coloring", fontsize=16)
+            ax3.set_xlabel("Time (s)"), ax3.set_ylabel("Power (W)")
+            ax3.fill_between(df['time'], df['power'], CP, where=df['power'] <= CP, color='#1f77b4', alpha=0.5, interpolate=True)
+            ax3.fill_between(df['time'], df['power'], CP, where=df['power'] > CP, color='#d62728', alpha=0.5, interpolate=True)
+            ax3.plot(df['time'], df['power'], color='black', linewidth=0.5, label='Power')
+            ax3.axhline(y=CP, color='orange', linestyle='--', label=f"CP = {int(CP)} W")
+            ax3.legend(), ax3.grid(True, linestyle='--', alpha=0.6)
+            st.pyplot(fig3)
+
+            # PLOT 4: Power vs. Cadence Heatmap
+            pedaling_df = df[df['cadence'] > 0]
+            if not pedaling_df.empty:
+                fig4, ax4 = plt.subplots(figsize=(10, 6))
+                hb = ax4.hexbin(pedaling_df['cadence'], pedaling_df['power'], gridsize=50, cmap='viridis', mincnt=1)
+                fig4.colorbar(hb, ax=ax4, label='Frequency of Occurrence')
+                ax4.set_xlabel("Cadence (rpm)"), ax4.set_ylabel("Power (W)"), ax4.set_title("Power vs. Cadence Density")
+                ax4.grid(True, linestyle='--', alpha=0.6)
+                st.pyplot(fig4)
+
+        with tab3:
+            st.header("Route Maps")
+            if 'position_lat' in df.columns and 'position_long' in df.columns and df[['position_lat', 'position_long']].notnull().all(axis=1).any():
+                gps_df = df[['position_lat', 'position_long', 'Wbal', 'power']].dropna().copy()
+                
+                st.subheader("Route Colored by W' Balance (%)")
+                gps_df['Wbal_percent'] = (gps_df['Wbal'] / WP) * 100
+                points = list(zip(gps_df['position_lat'], gps_df['position_long']))
+                wbal_colormap = cm.linear.RdYlGn_09.scale(0, 100)
+                wbal_colors = [wbal_colormap(p) for p in gps_df['Wbal_percent']]
+                m_wbal = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13)
+                ColorLine(points, colors=wbal_colors, colormap=wbal_colormap, weight=5).add_to(m_wbal)
+                wbal_colormap.caption = "W' Balance (%)"
+                m_wbal.add_child(wbal_colormap)
+                st_folium(m_wbal, width=1400, height=500)
+
+                st.subheader("Route Colored by Power vs. CP")
+                power_diff = gps_df['power'] - CP
+                norm_power = np.clip(power_diff, -150, 150)
+                power_colormap = cm.linear.RdBu_11.scale(-150, 150)
+                power_colors = [power_colormap(p) for p in norm_power]
+                m_power = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13)
+                ColorLine(points, colors=power_colors, colormap=power_colormap, weight=5).add_to(m_power)
+                power_colormap.caption = "Power relative to CP (Watts)"
+                m_power.add_child(power_colormap)
+                st_folium(m_power, width=1400, height=500)
+            else:
+                st.warning("No GPS data found in the file to generate maps.")
+
+        with tab4:
+            st.header("Full Data Table")
+            st.dataframe(df.round(2))
+            
+            # Provide a download button for the results
+            @st.cache_data
+            def convert_df_to_csv(df_to_convert):
+                return df_to_convert.to_csv(index=False).encode('utf-8')
+
+            csv = convert_df_to_csv(df)
+            st.download_button(
+                label="Download data as CSV",
+                data=csv,
+                file_name=f"{uploaded_file.name.split('.')[0]}_analysis.csv",
+                mime='text/csv',
+            )
+
+elif not uploaded_file and analyze_button:
+    st.warning("Please upload a .fit file first.")
+
 else:
-    print("Skipping Power vs. Cadence plot: No pedaling data found.")
-
-
-# --- 7. MAP VISUALIZATIONS ---
-# This section generates interactive maps of the route colored by performance metrics.
-# TODO: In Streamlit, these functions can be called within tabs or based on a selectbox.
-print("\nGenerating map visualizations...")
-
-# Check if GPS data is available
-if 'position_lat' in df.columns and 'position_long' in df.columns and df[['position_lat', 'position_long']].notnull().all(axis=1).any():
-    gps_df = df[['position_lat', 'position_long', 'Wbal', 'power']].dropna().copy()
-    
-    # --- Map 1: W'bal Percentage Route ---
-    gps_df['Wbal_percent'] = (gps_df['Wbal'] / WP) * 100
-    points = list(zip(gps_df['position_lat'], gps_df['position_long']))
-    
-    # Create a colormap from Red (0%) to Yellow (50%) to Green (100%)
-    wbal_colormap = cm.linear.RdYlGn_09.scale(0, 100)
-    wbal_colors = [wbal_colormap(p) for p in gps_df['Wbal_percent']]
-
-    m_wbal = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=14)
-    ColorLine(points, colors=wbal_colors, colormap=wbal_colormap, weight=5).add_to(m_wbal)
-    wbal_colormap.caption = "W' Balance (%)"
-    m_wbal.add_child(wbal_colormap)
-    
-    map_wbal_path = 'wbal_route.html'
-    m_wbal.save(map_wbal_path)
-    print(f"W'bal route map saved to: {map_wbal_path}")
-
-    # --- Map 2: Power vs. CP Route ---
-    # Normalize power relative to CP. We'll set a range, e.g., 50% below CP to 50% above CP
-    power_diff = gps_df['power'] - CP
-    # Cap the range for better color contrast, e.g., from -150W to +150W from CP
-    norm_power = np.clip(power_diff, -150, 150)
-    
-    # Create a diverging colormap from Blue (below) to White (at CP) to Red (above)
-    power_colormap = cm.linear.RdBu_11.scale(-150, 150)
-    power_colors = [power_colormap(p) for p in norm_power]
-
-    m_power = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=14)
-    ColorLine(points, colors=power_colors, colormap=power_colormap, weight=5).add_to(m_power)
-    power_colormap.caption = "Power relative to CP (Watts)"
-    m_power.add_child(power_colormap)
-
-    map_power_path = 'power_vs_cp_route.html'
-    m_power.save(map_power_path)
-    print(f"Power vs. CP route map saved to: {map_power_path}")
-
-else:
-    print("Skipping map generation: No valid GPS data found in the file.")
-
-print("\nAnalysis complete.")
+    st.info("Upload a file and click 'Analyze Ride' to begin.")
