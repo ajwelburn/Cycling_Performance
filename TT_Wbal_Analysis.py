@@ -33,7 +33,13 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
         with io.BytesIO(file_content) as fit_file:
             with fitdecode.FitReader(fit_file) as fit:
                 for frame in fit:
+                    # Prioritize the file_id message for the most accurate start time
+                    if frame.frame_type == fitdecode.FIT_FRAME_DATA and frame.name == "file_id":
+                        if frame.has_field("time_created"):
+                            start_time = frame.get_value("time_created")
+                    
                     if frame.frame_type == fitdecode.FIT_FRAME_DATA and frame.name == "record":
+                        # Fallback: if no file_id message, use the first record's timestamp
                         if start_time is None and frame.has_field("timestamp"):
                             start_time = frame.get_value("timestamp")
 
@@ -527,4 +533,3 @@ elif not uploaded_file and analyze_button:
 else:
     if 'results' not in st.session_state:
         st.info("Upload a file and click 'Analyze Ride' to begin.")
-
