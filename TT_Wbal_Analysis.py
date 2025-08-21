@@ -311,7 +311,8 @@ if 'results' in st.session_state:
             st.subheader("Route Colored by W' Balance (%)")
             gps_df['Wbal_percent'] = (gps_df['Wbal'] / WP) * 100
             gps_df['Wbal_percent'] = gps_df['Wbal_percent'].clip(0, 100)
-            wbal_colormap = cm.linear.Plasma.scale(0, 100)
+            # FIX: Using a valid colormap from the branca library
+            wbal_colormap = cm.linear.YlOrRd.scale(0, 100)
             m_wbal = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB dark_matter')
             for i in range(len(gps_df) - 1):
                 p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
