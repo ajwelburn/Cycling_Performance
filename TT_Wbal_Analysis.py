@@ -1,4 +1,5 @@
-import streamlit as st
+
+    import streamlit as st
 import pandas as pd
 import math as m
 import numpy as np
@@ -274,33 +275,40 @@ if 'results' in st.session_state:
         fig_wbal.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=False)
         if 'altitude' in df.columns and df['altitude'].notna().any():
             fig_wbal.add_trace(go.Scatter(x=df['time'], y=df['altitude'], name='Elevation (m)', line=dict(color='#2ca02c', width=2), fill='tozeroy'), secondary_y=True)
-        fig_wbal.update_layout(title_text='W\' Balance vs. Elevation', template='plotly_dark')
-        fig_wbal.update_yaxes(title_text="W'bal (kJ)", secondary_y=False); fig_wbal.update_yaxes(title_text="Elevation (m)", secondary_y=True)
+        fig_wbal.update_layout(title_text='W\' Balance vs. Elevation', template='plotly_white', font=dict(color="black"))
+        fig_wbal.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
+        fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True, title_text="W'bal (kJ)", secondary_y=False); 
+        fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True, title_text="Elevation (m)", secondary_y=True)
         st.plotly_chart(fig_wbal, use_container_width=True)
 
         fig_power = go.Figure()
         fig_power.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='cyan', width=1)))
         fig_power.add_shape(type="line", x0=df['time'].min(), y0=CP, x1=df['time'].max(), y1=CP, line=dict(color="#ff7f0e", width=2, dash="dash"), name=f"CP ({CP}W)")
-        fig_power.update_layout(title_text='Power over Time', template='plotly_dark')
+        fig_power.update_layout(title_text='Power over Time', template='plotly_white', font=dict(color="black"))
+        fig_power.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
+        fig_power.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
         st.plotly_chart(fig_power, use_container_width=True)
 
     with tab3:
         st.header("Power Profile")
         zones_df = power_profile["zones"]
         fig_zones = go.Figure(go.Bar(x=zones_df['Time (s)'], y=zones_df['Zone'], orientation='h', text=zones_df['Percentage'].apply(lambda x: f'{x:.1f}%')))
-        fig_zones.update_layout(title_text='Time in Power Zones', template='plotly_dark')
+        fig_zones.update_layout(title_text='Time in Power Zones', template='plotly_white', font=dict(color="black"))
+        fig_zones.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
+        fig_zones.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
         st.plotly_chart(fig_zones, use_container_width=True)
         
         mmp_df = power_profile["mmp"]
         fig_mmp = go.Figure(go.Scatter(x=mmp_df['Duration (s)'], y=mmp_df['Max Power (W)'], mode='lines+markers'))
-        fig_mmp.update_layout(title_text='Mean Maximal Power (MMP) Curve', template='plotly_dark', 
+        fig_mmp.update_layout(title_text='Mean Maximal Power (MMP) Curve', template='plotly_white', font=dict(color="black"),
                               xaxis_type="log",
                               xaxis = dict(
                                 tickmode = 'array',
                                 tickvals = [1, 5, 10, 30, 60, 120, 300, 600, 1200, 1800, 3600],
                                 ticktext = ['1s', '5s', '10s', '30s', '1m', '2m', '5m', '10m', '20m', '30m', '60m']
                             ))
-        fig_mmp.update_xaxes(title_text='Duration (log scale)'); fig_mmp.update_yaxes(title_text='Max Power (W)')
+        fig_mmp.update_xaxes(title_text='Duration (log scale)', showline=True, linewidth=2, linecolor='black', mirror=True)
+        fig_mmp.update_yaxes(title_text='Max Power (W)', showline=True, linewidth=2, linecolor='black', mirror=True)
         st.plotly_chart(fig_mmp, use_container_width=True)
 
     with tab4:
@@ -308,11 +316,11 @@ if 'results' in st.session_state:
         if 'position_lat' in df.columns and 'position_long' in df.columns and not df[['position_lat', 'position_long']].dropna().empty:
             gps_df = df[['position_lat', 'position_long', 'Wbal', 'power', 'speed_kmh']].dropna().copy()
             
+            # --- W'bal Map ---
             st.subheader("Route Colored by W' Balance (%)")
             gps_df['Wbal_percent'] = (gps_df['Wbal'] / WP) * 100
             gps_df['Wbal_percent'] = gps_df['Wbal_percent'].clip(0, 100)
-            # FIX: Using a valid, high-contrast colormap name in lowercase
-            wbal_colormap = cm.linear.viridis.scale(0, 100)
+            wbal_colormap = cm.LinearColormap(colors=['blue', 'cyan', 'yellow', 'red'], vmin=0, vmax=100)
             m_wbal = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB positron')
             for i in range(len(gps_df) - 1):
                 p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
@@ -323,10 +331,11 @@ if 'results' in st.session_state:
             m_wbal.add_child(wbal_colormap)
             st_folium(m_wbal, width=1400, height=500)
 
+            # --- Power vs CP Map ---
             st.subheader("Route Colored by Power vs. CP")
             power_diff = gps_df['power'] - CP
             norm_power = np.clip(power_diff, -150, 150)
-            power_colormap = cm.linear.coolwarm.scale(-150, 150)
+            power_colormap = cm.LinearColormap(colors=['blue', 'white', 'red'], vmin=-150, vmax=150)
             m_power = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB positron')
             for i in range(len(gps_df) - 1):
                 p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
@@ -336,10 +345,11 @@ if 'results' in st.session_state:
             power_colormap.caption = "Power relative to CP (Watts)"
             m_power.add_child(power_colormap)
             st_folium(m_power, width=1400, height=500)
-            
+
+            # --- Speed Map ---
             st.subheader("Route Colored by Speed (km/h)")
             min_speed, max_speed = gps_df['speed_kmh'].min(), gps_df['speed_kmh'].max()
-            speed_colormap = cm.linear.inferno.scale(min_speed, max_speed)
+            speed_colormap = cm.LinearColormap(colors=['yellow', 'orange', 'red'], vmin=min_speed, vmax=max_speed)
             m_speed = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB positron')
             for i in range(len(gps_df) - 1):
                 p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
@@ -366,7 +376,9 @@ if 'results' in st.session_state:
                 is_secondary = metric == 'Speed (km/h)'
                 fig_explorer.add_trace(go.Scatter(x=df['time'], y=smoothed_data, name=metric), secondary_y=is_secondary)
             
-            fig_explorer.update_layout(title_text='Data Explorer', template='plotly_dark')
+            fig_explorer.update_layout(title_text='Data Explorer', template='plotly_white', font=dict(color="black"))
+            fig_explorer.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
+            fig_explorer.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
             st.plotly_chart(fig_explorer, use_container_width=True)
 
 elif not uploaded_file and analyze_button:
