@@ -74,7 +74,6 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, List[int]]:
     if 'altitude' in df.columns:
         df['altitude'].fillna(method='ffill', inplace=True)
         
-    # Convert speed from m/s to km/h
     if 'speed' in df.columns:
         df['speed_kmh'] = df['speed'] * 3.6
 
@@ -206,14 +205,13 @@ if 'results' in st.session_state:
     WP = params["WP"]
     df['wbal_kj'] = df['Wbal'] / 1000
 
-    # Set modern plot style
-    plt.style.use("dark_background")
-    plt.rcParams.update({
-        'axes.edgecolor': 'white', 'axes.labelcolor': 'white',
-        'xtick.color': 'white', 'ytick.color': 'white',
-        'figure.facecolor': 'black', 'axes.facecolor': 'black',
-        'text.color': 'white', 'legend.facecolor': 'none'
-    })
+    # Define modern plot style
+    plot_style = {
+        'axes.edgecolor': '#cccccc', 'axes.labelcolor': '#cccccc',
+        'xtick.color': '#cccccc', 'ytick.color': '#cccccc',
+        'figure.facecolor': '#1e1e1e', 'axes.facecolor': '#1e1e1e',
+        'text.color': '#cccccc', 'legend.facecolor': 'none'
+    }
 
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Summary Metrics", "📈 Charts", "🗺️ Route Maps", "⚙️ Interactive Data"])
 
@@ -243,35 +241,37 @@ if 'results' in st.session_state:
         st.metric("Total Coasting Time (Cadence=0)", f"{round(metrics['coasting_time'])}s ({metrics['coasting_percent']}%)")
 
     with tab2:
-        st.header("Charts")
-        if 'altitude' in df.columns and df['altitude'].notna().any():
-            fig_elev, ax_elev1 = plt.subplots(figsize=(12, 6))
-            ax_elev1.set_xlabel('Time (s)'); ax_elev1.set_ylabel('W\'bal (kJ)', color='#9467bd')
-            ax_elev1.plot(df['time'], df['wbal_kj'], color='#9467bd', linewidth=2, label='W\'bal')
-            ax_elev1.tick_params(axis='y', labelcolor='#9467bd')
-            ax_elev1.axhline(y=0, color='grey', linestyle='--', linewidth=1)
-            ax_elev2 = ax_elev1.twinx()
-            ax_elev2.set_ylabel('Elevation (m)', color='#2ca02c')
-            ax_elev2.fill_between(df['time'], df['altitude'], color='#2ca02c', alpha=0.3, label='Elevation')
-            ax_elev2.tick_params(axis='y', labelcolor='#2ca02c')
-            fig_elev.suptitle('W\' Balance vs. Elevation'); fig_elev.tight_layout()
-            st.pyplot(fig_elev)
-        
-        fig3, ax3 = plt.subplots(figsize=(12, 6))
-        ax3.set_title("Power over Time with Threshold Coloring", fontsize=14)
-        ax3.set_xlabel("Time (s)"); ax3.set_ylabel("Power (W)")
-        ax3.fill_between(df['time'], df['power'], CP, where=df['power'] <= CP, color='#1f77b4', alpha=0.7, interpolate=True)
-        ax3.fill_between(df['time'], df['power'], CP, where=df['power'] > CP, color='#d62728', alpha=0.7, interpolate=True)
-        ax3.plot(df['time'], df['power'], color='lightgrey', linewidth=0.5, label='Power')
-        ax3.axhline(y=CP, color='#ff7f0e', linestyle='--', label=f"CP = {int(CP)} W")
-        stats_text = (f"Avg Power (Overall): {metrics['avg_power_overall']} W\n"
-                      f"Avg Power (>CP): {metrics['avg_power_above']} W\n"
-                      f"Avg Power (<=CP): {metrics['avg_power_below']} W")
-        ax3.text(0.02, 0.95, stats_text, transform=ax3.transAxes, fontsize=10,
-                 verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', facecolor='black', alpha=0.7))
-        ax3.legend(); ax3.grid(False)
-        st.pyplot(fig3)
-        plt.close('all')
+        with plt.style.context(plot_style):
+            st.header("Charts")
+            if 'altitude' in df.columns and df['altitude'].notna().any():
+                fig_elev, ax_elev1 = plt.subplots(figsize=(12, 6))
+                ax_elev1.set_xlabel('Time (s)'); ax_elev1.set_ylabel('W\'bal (kJ)', color='#9467bd')
+                ax_elev1.plot(df['time'], df['wbal_kj'], color='#9467bd', linewidth=2, label='W\'bal')
+                ax_elev1.tick_params(axis='y', labelcolor='#9467bd')
+                ax_elev1.axhline(y=0, color='grey', linestyle='--', linewidth=1)
+                ax_elev2 = ax_elev1.twinx()
+                ax_elev2.set_ylabel('Elevation (m)', color='#2ca02c')
+                ax_elev2.fill_between(df['time'], df['altitude'], color='#2ca02c', alpha=0.3, label='Elevation')
+                ax_elev2.tick_params(axis='y', labelcolor='#2ca02c')
+                fig_elev.suptitle('W\' Balance vs. Elevation'); fig_elev.tight_layout()
+                ax_elev1.grid(False); ax_elev2.grid(False)
+                st.pyplot(fig_elev)
+            
+            fig3, ax3 = plt.subplots(figsize=(12, 6))
+            ax3.set_title("Power over Time with Threshold Coloring", fontsize=14)
+            ax3.set_xlabel("Time (s)"); ax3.set_ylabel("Power (W)")
+            ax3.fill_between(df['time'], df['power'], CP, where=df['power'] <= CP, color='#1f77b4', alpha=0.7, interpolate=True)
+            ax3.fill_between(df['time'], df['power'], CP, where=df['power'] > CP, color='#d62728', alpha=0.7, interpolate=True)
+            ax3.plot(df['time'], df['power'], color='lightgrey', linewidth=0.5, label='Power')
+            ax3.axhline(y=CP, color='#ff7f0e', linestyle='--', label=f"CP = {int(CP)} W")
+            stats_text = (f"Avg Power (Overall): {metrics['avg_power_overall']} W\n"
+                          f"Avg Power (>CP): {metrics['avg_power_above']} W\n"
+                          f"Avg Power (<=CP): {metrics['avg_power_below']} W")
+            ax3.text(0.02, 0.95, stats_text, transform=ax3.transAxes, fontsize=10,
+                     verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', facecolor='#1e1e1e', alpha=0.7))
+            ax3.legend(); ax3.grid(False)
+            st.pyplot(fig3)
+            plt.close('all')
 
     with tab3:
         st.header("Route Maps")
@@ -281,7 +281,7 @@ if 'results' in st.session_state:
             st.subheader("Route Colored by W' Balance (%)")
             gps_df['Wbal_percent'] = (gps_df['Wbal'] / WP) * 100
             gps_df['Wbal_percent'] = gps_df['Wbal_percent'].clip(0, 100)
-            wbal_colormap = cm.linear.Plasma_06.scale(0, 100)
+            wbal_colormap = cm.linear.Plasma_6.scale(0, 100) # FIX: Corrected colormap name
             m_wbal = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB dark_matter')
             for i in range(len(gps_df) - 1):
                 p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
@@ -308,7 +308,7 @@ if 'results' in st.session_state:
             
             st.subheader("Route Colored by Speed (km/h)")
             min_speed, max_speed = gps_df['speed_kmh'].min(), gps_df['speed_kmh'].max()
-            speed_colormap = cm.linear.Inferno_06.scale(min_speed, max_speed)
+            speed_colormap = cm.linear.Inferno_6.scale(min_speed, max_speed) # FIX: Corrected colormap name
             m_speed = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB dark_matter')
             for i in range(len(gps_df) - 1):
                 p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
@@ -322,48 +322,50 @@ if 'results' in st.session_state:
             st.warning("No GPS data found in the file to generate maps.")
 
     with tab4:
-        st.header("Interactive Data Explorer")
-        
-        available_metrics = ['Power', 'Speed (km/h)']
-        selected_metrics = st.multiselect(
-            "Select data to display:",
-            options=available_metrics,
-            default=['Power', 'Speed (km/h)']
-        )
-
-        smoothing_window = st.slider("Smoothing (seconds)", min_value=1, max_value=30, value=5,
-                                     help="Applies a rolling average to the data. 1 = raw data.")
-
-        if selected_metrics:
-            fig_interactive, ax_interactive = plt.subplots(figsize=(12, 6))
-            ax_interactive.set_xlabel('Time (s)')
+        with plt.style.context(plot_style):
+            st.header("Interactive Data Explorer")
             
-            ax2 = ax_interactive.twinx()
-            ax_map = {'Power': ax_interactive, 'Speed (km/h)': ax2}
-            color_map = {'Power': '#1f77b4', 'Speed (km/h)': '#ff7f0e'}
-            label_map = {'Power': 'Power (W)', 'Speed (km/h)': 'Speed (km/h)'}
-            
-            ax1_used, ax2_used = False, False
+            available_metrics = ['Power', 'Speed (km/h)']
+            selected_metrics = st.multiselect(
+                "Select data to display:",
+                options=available_metrics,
+                default=['Power', 'Speed (km/h)']
+            )
 
-            for metric in selected_metrics:
-                axis = ax_map[metric]
-                col_name = metric.lower().replace(' (km/h)', '_kmh')
+            smoothing_window = st.slider("Smoothing (seconds)", min_value=1, max_value=30, value=5,
+                                         help="Applies a rolling average to the data. 1 = raw data.")
+
+            if selected_metrics:
+                fig_interactive, ax_interactive = plt.subplots(figsize=(12, 6))
+                ax_interactive.set_xlabel('Time (s)')
                 
-                smoothed_data = df[col_name].rolling(window=smoothing_window, min_periods=1).mean()
+                ax2 = ax_interactive.twinx()
+                ax_map = {'Power': ax_interactive, 'Speed (km/h)': ax2}
+                color_map = {'Power': '#1f77b4', 'Speed (km/h)': '#ff7f0e'}
+                label_map = {'Power': 'Power (W)', 'Speed (km/h)': 'Speed (km/h)'}
                 
-                axis.plot(df['time'], smoothed_data, label=metric, color=color_map[metric])
-                axis.set_ylabel(label_map[metric], color=color_map[metric])
-                axis.tick_params(axis='y', labelcolor=color_map[metric])
-                if axis == ax_interactive: ax1_used = True
-                if axis == ax2: ax2_used = True
-            
-            if not ax1_used: ax_interactive.get_yaxis().set_visible(False)
-            if not ax2_used: ax2.get_yaxis().set_visible(False)
-            
-            fig_interactive.legend(loc="upper right", bbox_to_anchor=(1,1), bbox_transform=ax_interactive.transAxes)
-            fig_interactive.tight_layout()
-            st.pyplot(fig_interactive)
-            plt.close(fig_interactive)
+                ax1_used, ax2_used = False, False
+
+                for metric in selected_metrics:
+                    axis = ax_map[metric]
+                    col_name = metric.lower().replace(' (km/h)', '_kmh')
+                    
+                    smoothed_data = df[col_name].rolling(window=smoothing_window, min_periods=1).mean()
+                    
+                    axis.plot(df['time'], smoothed_data, label=metric, color=color_map[metric])
+                    axis.set_ylabel(label_map[metric], color=color_map[metric])
+                    axis.tick_params(axis='y', labelcolor=color_map[metric])
+                    if axis == ax_interactive: ax1_used = True
+                    if axis == ax2: ax2_used = True
+                
+                if not ax1_used: ax_interactive.get_yaxis().set_visible(False)
+                if not ax2_used: ax2.get_yaxis().set_visible(False)
+                
+                fig_interactive.legend(loc="upper right", bbox_to_anchor=(1,1), bbox_transform=ax_interactive.transAxes)
+                fig_interactive.tight_layout()
+                ax_interactive.grid(False); ax2.grid(False)
+                st.pyplot(fig_interactive)
+                plt.close(fig_interactive)
 
 elif not uploaded_file and analyze_button:
     st.warning("Please upload a .fit file first.")
