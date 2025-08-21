@@ -85,14 +85,14 @@ with st.sidebar:
     uploaded_file = st.file_uploader("Choose a .fit file", type="fit")
     
     st.header("2. Input Parameters")
-    # Using session state to remember values
-    if 'A' not in st.session_state: st.session_state.A = 339.3
-    if 'B' not in st.session_state: st.session_state.B = -0.789
+    # Using session state to remember values and new defaults
+    if 'A' not in st.session_state: st.session_state.A = 6000.0
+    if 'B' not in st.session_state: st.session_state.B = -0.68
     if 'CP' not in st.session_state: st.session_state.CP = 350
     if 'WP' not in st.session_state: st.session_state.WP = 20000
 
-    A = st.number_input('Tau Constant (A)', value=st.session_state.A, format="%.3f")
-    B = st.number_input('Tau Constant (B)', value=st.session_state.B, format="%.3f")
+    A = st.number_input('AW Simple Tau Constant (A)', value=st.session_state.A, format="%.2f")
+    B = st.number_input('AW Simple Tau Constant (B)', value=st.session_state.B, format="%.2f")
     CP = st.number_input('Critical Power (CP) in Watts', value=st.session_state.CP, step=1)
     WP = st.number_input('W\' (W prime) in Joules', value=st.session_state.WP, step=100)
 
@@ -117,7 +117,6 @@ if uploaded_file and analyze_button:
             Wbal_old = float(WP)
             Wexp = 0.0
             
-            # Pre-allocate columns for performance
             wbal_list, tau_list, wexp_list, rec_list = [0.0]*len(df), [0.0]*len(df), [0.0]*len(df), [0.0]*len(df)
             wbal_list[0] = float(WP)
 
@@ -133,7 +132,8 @@ if uploaded_file and analyze_button:
                     Tau = A * (DCP2 ** B) if DCP2 > 0 else 0
                     Wbal = WP - (Wexp * m.exp(-1 / Tau)) if Tau > 0 else Wbal
                 
-                Wbal = max(0, min(WP, Wbal))
+                # MODIFICATION: Allow W'bal to go negative by removing max(0, ...)
+                Wbal = min(WP, Wbal)
                 Wexp = WP - Wbal
                 Rec = Wbal - Wbal_old
 
@@ -225,45 +225,47 @@ if uploaded_file and analyze_button:
 
         with tab2:
             st.header("Charts")
+            plt.style.use('seaborn-v0_8-whitegrid') # Modern plot style
+
             # PLOT 1: W' Balance Over Time
-            fig1, ax1 = plt.subplots(figsize=(15, 7))
+            fig1, ax1 = plt.subplots(figsize=(12, 6))
             ax1.plot(df['time'], df['Wbal'], label='W\'bal', color='purple', linewidth=2)
+            ax1.axhline(y=0, color='grey', linestyle='--', linewidth=1) # Add zero line
             ax1.set_xlabel('Time (s)'), ax1.set_ylabel('W\'bal (Joules)'), ax1.set_title('W\' Balance Over Time')
-            ax1.grid(True, linestyle='--', alpha=0.6), ax1.legend()
+            ax1.legend()
             st.pyplot(fig1)
 
             # PLOT 2: Summary Bar Plots
             labels, time_data = ['Above CP', 'Below CP'], [round(total_time_above), round(total_time_below)]
             avg_power_data, bouts_data = [avg_power_above, avg_power_below], [bouts_above, bouts_below]
             avg_bout_time = [avg_time_per_bout_above, avg_time_per_bout_below]
-            fig2, axs = plt.subplots(1, 4, figsize=(18, 5))
-            fig2.suptitle(f"Power Data Summary (Threshold = {int(CP)} W)", fontsize=16)
-            axs[0].bar(labels, time_data, color=['#d62728', '#1f77b4']), axs[0].set_title("Total Time (s)"), axs[0].set_ylabel("Seconds")
-            axs[1].bar(labels, avg_power_data, color=['#d62728', '#1f77b4']), axs[1].set_title("Average Power (W)"), axs[1].set_ylabel("Watts")
-            axs[2].bar(labels, bouts_data, color=['#d62728', '#1f77b4']), axs[2].set_title("Number of Bouts"), axs[2].set_ylabel("Count")
-            axs[3].bar(labels, avg_bout_time, color=['#d62728', '#1f77b4']), axs[3].set_title("Avg Time per Bout (s)"), axs[3].set_ylabel("Seconds")
+            fig2, axs = plt.subplots(1, 4, figsize=(15, 4))
+            fig2.suptitle(f"Power Data Summary (Threshold = {int(CP)} W)", fontsize=14)
+            axs[0].bar(labels, time_data, color=['#d62728', '#1f77b4']), axs[0].set_title("Total Time (s)")
+            axs[1].bar(labels, avg_power_data, color=['#d62728', '#1f77b4']), axs[1].set_title("Average Power (W)")
+            axs[2].bar(labels, bouts_data, color=['#d62728', '#1f77b4']), axs[2].set_title("Number of Bouts")
+            axs[3].bar(labels, avg_bout_time, color=['#d62728', '#1f77b4']), axs[3].set_title("Avg Time per Bout (s)")
             plt.tight_layout(rect=[0, 0.03, 1, 0.95])
             st.pyplot(fig2)
 
             # PLOT 3: Power Over Time
-            fig3, ax3 = plt.subplots(figsize=(15, 7))
-            ax3.set_title("Power over Time with Threshold Coloring", fontsize=16)
+            fig3, ax3 = plt.subplots(figsize=(12, 6))
+            ax3.set_title("Power over Time with Threshold Coloring", fontsize=14)
             ax3.set_xlabel("Time (s)"), ax3.set_ylabel("Power (W)")
             ax3.fill_between(df['time'], df['power'], CP, where=df['power'] <= CP, color='#1f77b4', alpha=0.5, interpolate=True)
             ax3.fill_between(df['time'], df['power'], CP, where=df['power'] > CP, color='#d62728', alpha=0.5, interpolate=True)
             ax3.plot(df['time'], df['power'], color='black', linewidth=0.5, label='Power')
             ax3.axhline(y=CP, color='orange', linestyle='--', label=f"CP = {int(CP)} W")
-            ax3.legend(), ax3.grid(True, linestyle='--', alpha=0.6)
+            ax3.legend()
             st.pyplot(fig3)
 
-            # PLOT 4: Power vs. Cadence Heatmap
+            # PLOT 4: Power vs. Cadence Heatmap (smaller)
             pedaling_df = df[df['cadence'] > 0]
             if not pedaling_df.empty:
-                fig4, ax4 = plt.subplots(figsize=(10, 6))
-                hb = ax4.hexbin(pedaling_df['cadence'], pedaling_df['power'], gridsize=50, cmap='viridis', mincnt=1)
+                fig4, ax4 = plt.subplots(figsize=(8, 5)) # MODIFICATION: Smaller figure size
+                hb = ax4.hexbin(pedaling_df['cadence'], pedaling_df['power'], gridsize=40, cmap='viridis', mincnt=1)
                 fig4.colorbar(hb, ax=ax4, label='Frequency of Occurrence')
                 ax4.set_xlabel("Cadence (rpm)"), ax4.set_ylabel("Power (W)"), ax4.set_title("Power vs. Cadence Density")
-                ax4.grid(True, linestyle='--', alpha=0.6)
                 st.pyplot(fig4)
 
         with tab3:
@@ -275,7 +277,8 @@ if uploaded_file and analyze_button:
                 gps_df['Wbal_percent'] = (gps_df['Wbal'] / WP) * 100
                 points = list(zip(gps_df['position_lat'], gps_df['position_long']))
                 wbal_colormap = cm.linear.RdYlGn_09.scale(0, 100)
-                wbal_colors = [wbal_colormap(p) for p in gps_df['Wbal_percent']]
+                # FIX: Cast numpy float to standard float for colormap
+                wbal_colors = [wbal_colormap(float(p)) for p in gps_df['Wbal_percent']]
                 m_wbal = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13)
                 ColorLine(points, colors=wbal_colors, colormap=wbal_colormap, weight=5).add_to(m_wbal)
                 wbal_colormap.caption = "W' Balance (%)"
@@ -286,7 +289,8 @@ if uploaded_file and analyze_button:
                 power_diff = gps_df['power'] - CP
                 norm_power = np.clip(power_diff, -150, 150)
                 power_colormap = cm.linear.RdBu_11.scale(-150, 150)
-                power_colors = [power_colormap(p) for p in norm_power]
+                # FIX: Cast numpy float to standard float for colormap
+                power_colors = [power_colormap(float(p)) for p in norm_power]
                 m_power = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13)
                 ColorLine(points, colors=power_colors, colormap=power_colormap, weight=5).add_to(m_power)
                 power_colormap.caption = "Power relative to CP (Watts)"
@@ -299,7 +303,6 @@ if uploaded_file and analyze_button:
             st.header("Full Data Table")
             st.dataframe(df.round(2))
             
-            # Provide a download button for the results
             @st.cache_data
             def convert_df_to_csv(df_to_convert):
                 return df_to_convert.to_csv(index=False).encode('utf-8')
