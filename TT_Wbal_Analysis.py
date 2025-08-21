@@ -35,6 +35,7 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, List[int]]:
                             "cadence": frame.get_value("cadence", fallback=None),
                             "altitude": frame.get_value("altitude", fallback=None),
                             "heart_rate": frame.get_value("heart_rate", fallback=None),
+                            "speed": frame.get_value("speed", fallback=None),
                             "position_lat": frame.get_value("position_lat", fallback=None),
                             "position_long": frame.get_value("position_long", fallback=None),
                         }
@@ -60,12 +61,11 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, List[int]]:
 
     missing_power_mask = df['power'].isnull()
     missing_count = missing_power_mask.sum()
-    missing_times = df.loc[missing_power_mask, 'time'].round().astype(int).tolist()
-
+    
     df['power'].fillna(0, inplace=True)
     df['power'] = pd.to_numeric(df['power'], errors='coerce')
 
-    for col in ['cadence', 'heart_rate']:
+    for col in ['cadence', 'heart_rate', 'speed']:
         if col not in df.columns:
             df[col] = 0
         df[col].fillna(0, inplace=True)
@@ -73,8 +73,12 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, List[int]]:
 
     if 'altitude' in df.columns:
         df['altitude'].fillna(method='ffill', inplace=True)
+        
+    # Convert speed from m/s to km/h
+    if 'speed' in df.columns:
+        df['speed_kmh'] = df['speed'] * 3.6
 
-    return df, missing_count, missing_times
+    return df, missing_count, []
 
 # --- Main App Interface ---
 st.title("🚴 W' Balance and Time Trial Analysis Tool")
@@ -200,9 +204,16 @@ if 'results' in st.session_state:
     params = results["params"]
     CP = params["CP"]
     WP = params["WP"]
-
-    # FIX: Create Wbal_kJ column before rendering any tabs
     df['wbal_kj'] = df['Wbal'] / 1000
+
+    # Set modern plot style
+    plt.style.use("dark_background")
+    plt.rcParams.update({
+        'axes.edgecolor': 'white', 'axes.labelcolor': 'white',
+        'xtick.color': 'white', 'ytick.color': 'white',
+        'figure.facecolor': 'black', 'axes.facecolor': 'black',
+        'text.color': 'white', 'legend.facecolor': 'none'
+    })
 
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Summary Metrics", "📈 Charts", "🗺️ Route Maps", "⚙️ Interactive Data"])
 
@@ -233,54 +244,45 @@ if 'results' in st.session_state:
 
     with tab2:
         st.header("Charts")
-
-        # CONSOLIDATED W'BAL CHART LOGIC
         if 'altitude' in df.columns and df['altitude'].notna().any():
             fig_elev, ax_elev1 = plt.subplots(figsize=(12, 6))
-            ax_elev1.set_xlabel('Time (s)'); ax_elev1.set_ylabel('W\'bal (kJ)', color='purple')
-            ax_elev1.plot(df['time'], df['wbal_kj'], color='purple', linewidth=2, label='W\'bal')
-            ax_elev1.tick_params(axis='y', labelcolor='purple')
+            ax_elev1.set_xlabel('Time (s)'); ax_elev1.set_ylabel('W\'bal (kJ)', color='#9467bd')
+            ax_elev1.plot(df['time'], df['wbal_kj'], color='#9467bd', linewidth=2, label='W\'bal')
+            ax_elev1.tick_params(axis='y', labelcolor='#9467bd')
             ax_elev1.axhline(y=0, color='grey', linestyle='--', linewidth=1)
             ax_elev2 = ax_elev1.twinx()
-            ax_elev2.set_ylabel('Elevation (m)', color='green')
-            ax_elev2.plot(df['time'], df['altitude'], color='green', linewidth=2, label='Elevation')
-            ax_elev2.tick_params(axis='y', labelcolor='green')
+            ax_elev2.set_ylabel('Elevation (m)', color='#2ca02c')
+            ax_elev2.fill_between(df['time'], df['altitude'], color='#2ca02c', alpha=0.3, label='Elevation')
+            ax_elev2.tick_params(axis='y', labelcolor='#2ca02c')
             fig_elev.suptitle('W\' Balance vs. Elevation'); fig_elev.tight_layout()
             st.pyplot(fig_elev)
-        else:
-            fig1, ax1 = plt.subplots(figsize=(12, 6))
-            ax1.plot(df['time'], df['wbal_kj'], label='W\'bal', color='purple', linewidth=2)
-            ax1.axhline(y=0, color='grey', linestyle='--', linewidth=1)
-            ax1.set_xlabel('Time (s)'); ax1.set_ylabel('W\'bal (kJ)'); ax1.set_title('W\' Balance Over Time')
-            ax1.grid(False); ax1.legend()
-            st.pyplot(fig1)
-
+        
         fig3, ax3 = plt.subplots(figsize=(12, 6))
         ax3.set_title("Power over Time with Threshold Coloring", fontsize=14)
         ax3.set_xlabel("Time (s)"); ax3.set_ylabel("Power (W)")
-        ax3.fill_between(df['time'], df['power'], CP, where=df['power'] <= CP, color='#1f77b4', alpha=0.5, interpolate=True)
-        ax3.fill_between(df['time'], df['power'], CP, where=df['power'] > CP, color='#d62728', alpha=0.5, interpolate=True)
-        ax3.plot(df['time'], df['power'], color='black', linewidth=0.5, label='Power')
-        ax3.axhline(y=CP, color='orange', linestyle='--', label=f"CP = {int(CP)} W")
+        ax3.fill_between(df['time'], df['power'], CP, where=df['power'] <= CP, color='#1f77b4', alpha=0.7, interpolate=True)
+        ax3.fill_between(df['time'], df['power'], CP, where=df['power'] > CP, color='#d62728', alpha=0.7, interpolate=True)
+        ax3.plot(df['time'], df['power'], color='lightgrey', linewidth=0.5, label='Power')
+        ax3.axhline(y=CP, color='#ff7f0e', linestyle='--', label=f"CP = {int(CP)} W")
         stats_text = (f"Avg Power (Overall): {metrics['avg_power_overall']} W\n"
                       f"Avg Power (>CP): {metrics['avg_power_above']} W\n"
                       f"Avg Power (<=CP): {metrics['avg_power_below']} W")
         ax3.text(0.02, 0.95, stats_text, transform=ax3.transAxes, fontsize=10,
-                 verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', facecolor='wheat', alpha=0.5))
+                 verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', facecolor='black', alpha=0.7))
         ax3.legend(); ax3.grid(False)
         st.pyplot(fig3)
-        plt.close('all') # Close all figures to prevent memory leaks and stray text
+        plt.close('all')
 
     with tab3:
         st.header("Route Maps")
         if 'position_lat' in df.columns and 'position_long' in df.columns and not df[['position_lat', 'position_long']].dropna().empty:
-            gps_df = df[['position_lat', 'position_long', 'Wbal', 'power']].dropna().copy()
+            gps_df = df[['position_lat', 'position_long', 'Wbal', 'power', 'speed_kmh']].dropna().copy()
             
             st.subheader("Route Colored by W' Balance (%)")
             gps_df['Wbal_percent'] = (gps_df['Wbal'] / WP) * 100
             gps_df['Wbal_percent'] = gps_df['Wbal_percent'].clip(0, 100)
-            wbal_colormap = cm.linear.RdYlGn_09.scale(0, 100)
-            m_wbal = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13)
+            wbal_colormap = cm.linear.Plasma_06.scale(0, 100)
+            m_wbal = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB dark_matter')
             for i in range(len(gps_df) - 1):
                 p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
                           gps_df[['position_lat', 'position_long']].iloc[i+1].values)
@@ -293,8 +295,8 @@ if 'results' in st.session_state:
             st.subheader("Route Colored by Power vs. CP")
             power_diff = gps_df['power'] - CP
             norm_power = np.clip(power_diff, -150, 150)
-            power_colormap = cm.linear.RdBu_11.scale(-150, 150)
-            m_power = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13)
+            power_colormap = cm.linear.coolwarm.scale(-150, 150)
+            m_power = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB dark_matter')
             for i in range(len(gps_df) - 1):
                 p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
                           gps_df[['position_lat', 'position_long']].iloc[i+1].values)
@@ -303,22 +305,30 @@ if 'results' in st.session_state:
             power_colormap.caption = "Power relative to CP (Watts)"
             m_power.add_child(power_colormap)
             st_folium(m_power, width=1400, height=500)
+            
+            st.subheader("Route Colored by Speed (km/h)")
+            min_speed, max_speed = gps_df['speed_kmh'].min(), gps_df['speed_kmh'].max()
+            speed_colormap = cm.linear.Inferno_06.scale(min_speed, max_speed)
+            m_speed = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB dark_matter')
+            for i in range(len(gps_df) - 1):
+                p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
+                          gps_df[['position_lat', 'position_long']].iloc[i+1].values)
+                avg_speed = (gps_df['speed_kmh'].iloc[i] + gps_df['speed_kmh'].iloc[i+1]) / 2
+                folium.PolyLine([p1, p2], color=speed_colormap(avg_speed), weight=5).add_to(m_speed)
+            speed_colormap.caption = "Speed (km/h)"
+            m_speed.add_child(speed_colormap)
+            st_folium(m_speed, width=1400, height=500)
         else:
             st.warning("No GPS data found in the file to generate maps.")
 
     with tab4:
         st.header("Interactive Data Explorer")
         
-        available_metrics = ['Power', 'Cadence', 'W\'bal (kJ)']
-        if 'heart_rate' in df.columns and df['heart_rate'].sum() > 0:
-            available_metrics.append('Heart Rate')
-        if 'altitude' in df.columns and df['altitude'].notna().any():
-            available_metrics.append('Altitude')
-
+        available_metrics = ['Power', 'Speed (km/h)']
         selected_metrics = st.multiselect(
             "Select data to display:",
             options=available_metrics,
-            default=['Power', 'W\'bal (kJ)']
+            default=['Power', 'Speed (km/h)']
         )
 
         smoothing_window = st.slider("Smoothing (seconds)", min_value=1, max_value=30, value=5,
@@ -329,16 +339,15 @@ if 'results' in st.session_state:
             ax_interactive.set_xlabel('Time (s)')
             
             ax2 = ax_interactive.twinx()
-            ax_map = {'Power': ax_interactive, 'Cadence': ax2, 'Heart Rate': ax2, 'Altitude': ax2, 'W\'bal (kJ)': ax_interactive}
-            color_map = {'Power': 'blue', 'Cadence': 'green', 'Heart Rate': 'red', 'Altitude': 'orange', 'W\'bal (kJ)': 'purple'}
-            label_map = {'Power': 'Power (W)', 'Cadence': 'Cadence (rpm)', 'Heart Rate': 'Heart Rate (bpm)', 'Altitude': 'Altitude (m)', 'W\'bal (kJ)': 'W\'bal (kJ)'}
+            ax_map = {'Power': ax_interactive, 'Speed (km/h)': ax2}
+            color_map = {'Power': '#1f77b4', 'Speed (km/h)': '#ff7f0e'}
+            label_map = {'Power': 'Power (W)', 'Speed (km/h)': 'Speed (km/h)'}
             
             ax1_used, ax2_used = False, False
 
             for metric in selected_metrics:
                 axis = ax_map[metric]
-                # FIX: Correctly generate column name from metric label
-                col_name = metric.lower().replace('\'', '').replace(' (kj)', '_kj').replace(' ', '_')
+                col_name = metric.lower().replace(' (km/h)', '_kmh')
                 
                 smoothed_data = df[col_name].rolling(window=smoothing_window, min_periods=1).mean()
                 
@@ -355,19 +364,6 @@ if 'results' in st.session_state:
             fig_interactive.tight_layout()
             st.pyplot(fig_interactive)
             plt.close(fig_interactive)
-
-        st.markdown("---")
-        st.subheader("Download Full Data")
-        @st.cache_data
-        def convert_df_to_csv(df_to_convert):
-            return df_to_convert.to_csv(index=False).encode('utf-8')
-        csv = convert_df_to_csv(df)
-        st.download_button(
-            label="Download data as CSV",
-            data=csv,
-            file_name=f"{st.session_state.current_file.split('.')[0]}_analysis.csv",
-            mime='text/csv',
-        )
 
 elif not uploaded_file and analyze_button:
     st.warning("Please upload a .fit file first.")
