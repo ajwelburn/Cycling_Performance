@@ -16,7 +16,7 @@ import requests
 # --- Page Configuration ---
 st.set_page_config(
     page_title="W'bal Analysis Tool",
-    page_icon="🚴",
+    page_icon="�",
     layout="wide"
 )
 
@@ -178,6 +178,7 @@ def analyze_bouts(df: pd.DataFrame, bouts: List[Dict], bout_type: str) -> pd.Dat
     summary = []
     for i, bout in enumerate(bouts):
         bout_df = df.iloc[bout['start']:bout['end']]
+        if bout_df.empty: continue
         wbal_change = bout_df['Wbal'].iloc[0] - bout_df['Wbal'].iloc[-1]
         summary.append({
             "Bout": f"{bout_type} Bout {i+1}",
@@ -334,7 +335,7 @@ if 'results' in st.session_state:
     CP, WP = params["CP"], params["WP"]
     df['wbal_kj'] = df['Wbal'] / 1000
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Summary", "📈 Ride Profile", "⚡ Power Profile", "🏃 Interval Analysis", "🗺️ Route Maps", "⚙️ Data Explorer"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Summary", "🏃 Interval Analysis", "📈 Ride Profile", "⚡ Power Profile", "🗺️ Route Maps", "⚙️ Data Explorer"])
 
     with tab1:
         st.header("Ride Summary")
@@ -377,6 +378,43 @@ if 'results' in st.session_state:
             st.metric("Number of Bouts", f"{metrics['bouts_below']}")
 
     with tab2:
+        st.header("Interval Analysis")
+        fig_intervals = make_subplots(specs=[[{"secondary_y": True}]])
+        fig_intervals.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='grey', width=1)), secondary_y=False)
+        fig_intervals.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=True)
+        
+        # Add subtle background for all >CP efforts
+        df['above_cp'] = df['power'] > CP
+        start = None
+        for i, above in enumerate(df['above_cp']):
+            if above and start is None:
+                start = df['time'].iloc[i]
+            elif not above and start is not None:
+                fig_intervals.add_vrect(x0=start, x1=df['time'].iloc[i], fillcolor="grey", opacity=0.1, layer="below", line_width=0)
+                start = None
+        if start is not None:
+             fig_intervals.add_vrect(x0=start, x1=df['time'].iloc[-1], fillcolor="grey", opacity=0.1, layer="below", line_width=0)
+
+        # Highlight top bouts
+        for bout in interval_analysis['above_bouts']:
+            bout_df = df.iloc[bout['start']:bout['end']]
+            fig_intervals.add_trace(go.Scatter(x=bout_df['time'], y=bout_df['wbal_kj'], fill='tozeroy', mode='none', fillcolor='rgba(214, 39, 40, 0.4)', name='Top Effort'), secondary_y=True)
+        for bout in interval_analysis['below_bouts']:
+            bout_df = df.iloc[bout['start']:bout['end']]
+            fig_intervals.add_trace(go.Scatter(x=bout_df['time'], y=bout_df['wbal_kj'], fill='tonexty', mode='none', fillcolor='rgba(31, 119, 180, 0.4)', y0=bout_df['wbal_kj'].iloc[0], name='Top Recovery'), secondary_y=True)
+
+        fig_intervals.update_layout(title_text='Top Bouts vs. Power and W\'bal', template='plotly_white', font=dict(color="black"), showlegend=True)
+        fig_intervals.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
+        fig_intervals.update_yaxes(title_text="Power (W)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False)
+        fig_intervals.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
+        st.plotly_chart(fig_intervals, use_container_width=True)
+
+        st.subheader("Top 3 Efforts (>CP)")
+        st.dataframe(interval_analysis['above_summary'])
+        st.subheader("Top 3 Recovery Bouts (<=CP)")
+        st.dataframe(interval_analysis['below_summary'])
+
+    with tab3:
         st.header("Ride Profile Charts")
         fig_wbal = make_subplots(specs=[[{"secondary_y": True}]])
         fig_wbal.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=False)
@@ -396,7 +434,7 @@ if 'results' in st.session_state:
         fig_power.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
         st.plotly_chart(fig_power, use_container_width=True)
 
-    with tab3:
+    with tab4:
         st.header("Power Profile")
         zones_df = power_profile["zones"]
         fig_zones = go.Figure(go.Bar(x=zones_df['Time (s)'], y=zones_df['Zone'], orientation='h', text=zones_df['Percentage'].apply(lambda x: f'{x:.1f}%')))
@@ -417,28 +455,6 @@ if 'results' in st.session_state:
         fig_mmp.update_xaxes(title_text='Duration (log scale)', showline=True, linewidth=2, linecolor='black', mirror=False)
         fig_mmp.update_yaxes(title_text='Max Power (W)', showline=True, linewidth=2, linecolor='black', mirror=False)
         st.plotly_chart(fig_mmp, use_container_width=True)
-
-    with tab4:
-        st.header("Interval Analysis")
-        fig_intervals = make_subplots(specs=[[{"secondary_y": True}]])
-        fig_intervals.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='grey', width=1)), secondary_y=False)
-        fig_intervals.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=True)
-        
-        for bout in interval_analysis['above_bouts']:
-            fig_intervals.add_vrect(x0=df['time'].iloc[bout['start']], x1=df['time'].iloc[bout['end']], fillcolor="red", opacity=0.2, layer="below", line_width=0)
-        for bout in interval_analysis['below_bouts']:
-            fig_intervals.add_vrect(x0=df['time'].iloc[bout['start']], x1=df['time'].iloc[bout['end']], fillcolor="blue", opacity=0.2, layer="below", line_width=0)
-
-        fig_intervals.update_layout(title_text='Top Bouts vs. Power and W\'bal', template='plotly_white', font=dict(color="black"))
-        fig_intervals.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
-        fig_intervals.update_yaxes(title_text="Power (W)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False)
-        fig_intervals.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
-        st.plotly_chart(fig_intervals, use_container_width=True)
-
-        st.subheader("Top 3 Efforts (>CP)")
-        st.dataframe(interval_analysis['above_summary'])
-        st.subheader("Top 3 Recovery Bouts (<=CP)")
-        st.dataframe(interval_analysis['below_summary'])
 
     with tab5:
         st.header("Route Maps")
