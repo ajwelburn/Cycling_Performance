@@ -273,12 +273,13 @@ def get_time_of_day(hour: int) -> str:
     elif 12 <= hour < 18: return "Afternoon"
     else: return "Evening"
     
-def format_seconds_to_min_sec(seconds: float) -> str:
-    """Converts seconds into a 'X min Y s' format."""
+def format_seconds_to_hms(seconds: float) -> str:
+    """Converts seconds into a 'Xh Ym Zs' format."""
     seconds = round(seconds)
-    minutes = seconds // 60
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
     remaining_seconds = seconds % 60
-    return f"{minutes} min {remaining_seconds} s"
+    return f"{hours}h {minutes}m {remaining_seconds}s"
 
 # --- Main App Interface ---
 st.title("🚴 W' Balance and Time Trial Analysis Tool")
@@ -453,12 +454,12 @@ if 'results' in st.session_state:
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("##### Above CP")
-            st.metric("Total Time", format_seconds_to_min_sec(metrics['total_time_above']))
+            st.metric("Total Time", format_seconds_to_hms(metrics['total_time_above']))
             st.metric("Avg Power", f"{metrics['avg_power_above']} W")
             st.metric("Number of Bouts", f"{metrics['bouts_above']}")
         with col2:
             st.markdown("##### Below or At CP")
-            st.metric("Total Time", format_seconds_to_min_sec(metrics['total_time_below']))
+            st.metric("Total Time", format_seconds_to_hms(metrics['total_time_below']))
             st.metric("Avg Power", f"{metrics['avg_power_below']} W")
             st.metric("Number of Bouts", f"{metrics['bouts_below']}")
 
