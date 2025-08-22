@@ -82,14 +82,14 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     missing_power_count = df['power'].isnull().sum()
     if missing_power_count > 0:
         st.warning(f"Note: Found and replaced {missing_power_count} missing power data point(s) with 0.")
-    df['power'].fillna(0, inplace=True)
+    df['power'] = df['power'].fillna(0)
     
     for col in ['power', 'cadence', 'heart_rate', 'speed', 'distance', 'temperature']:
         if col not in df.columns: df[col] = np.nan
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
 
-    if 'altitude' in df.columns: df['altitude'].fillna(method='ffill', inplace=True)
+    if 'altitude' in df.columns: df['altitude'] = df['altitude'].fillna(method='ffill')
     if 'speed' in df.columns: df['speed_kmh'] = df['speed'] * 3.6
 
     return df, missing_power_count, start_time
@@ -244,7 +244,13 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
         duration = len(match['powers'])
         avg_power = sum(match['powers']) / duration
         magnitude = (avg_power / cp) * 100
-        match_data.append({"Duration (s)": duration, "Magnitude (%CP)": magnitude})
+        w_prime_depleted = duration * (avg_power - cp)
+        depletion_percent = (w_prime_depleted / w_prime) * 100 if w_prime > 0 else 0
+        match_data.append({
+            "Duration (s)": duration, 
+            "Magnitude (%CP)": magnitude,
+            "Depletion (% W')": depletion_percent
+        })
 
     summary = {
         "Total Matches": len(match_data),
@@ -487,11 +493,23 @@ if 'results' in st.session_state:
         col3.metric("Avg Match Magnitude", f"{matches_summary['Avg Magnitude (%CP)']:.1f}%")
 
         fig_matches = go.Figure()
-        fig_matches.add_trace(go.Scatter(x=matches_df['Duration (s)'], y=matches_df['Magnitude (%CP)'], mode='markers', name='Matches'))
+        fig_matches.add_trace(go.Scatter(
+            x=matches_df['Duration (s)'], 
+            y=matches_df['Magnitude (%CP)'], 
+            mode='markers', 
+            name='Matches',
+            marker=dict(
+                color=matches_df["Depletion (% W')"],
+                colorscale='RdYlGn_r',
+                showscale=True,
+                colorbar=dict(title="W' Depletion %")
+            )
+        ))
 
         # Add W' depletion curves
+        max_duration = max(71, matches_df['Duration (s)'].max() + 10) if not matches_df.empty else 71
         for depletion in range(10, 60, 10):
-            durations = np.arange(1, 71)
+            durations = np.arange(1, max_duration)
             power_depletion = (WP * (depletion / 100) / durations) + CP
             magnitude = (power_depletion / CP) * 100
             fig_matches.add_trace(go.Scatter(x=durations, y=magnitude, mode='lines', line=dict(dash='dot', color='grey'), name=f'{depletion}% W\' depletion'))
