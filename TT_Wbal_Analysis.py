@@ -17,7 +17,7 @@ import plotly.colors
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="W'bal Analysis Tool",
+    page_title="W'bal Analysis Tool by Alex Welburn",
     page_icon="🚴",
     layout="wide"
 )
@@ -458,7 +458,7 @@ if 'results' in st.session_state:
         c6.metric("Coasting", f"{metrics.get('coasting_percent', 'N/A')}%")
         
         st.divider()
-        st.header(f"Power Analysis (Threshold = {int(CP)} W)")
+        st.header(f"Power Analysis (CP = {int(CP)} W)")
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("##### Above CP")
@@ -491,9 +491,9 @@ if 'results' in st.session_state:
         fig_intervals.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
         st.plotly_chart(fig_intervals, use_container_width=True)
 
-        st.subheader("Top 3 Efforts (>CP)")
+        st.subheader("Top 3 Efforts (Above CP)")
         st.dataframe(interval_analysis['above_summary'])
-        st.subheader("Top 3 Recovery Bouts (<=CP)")
+        st.subheader("Top 3 Recovery Bouts (Below CP)")
         st.dataframe(interval_analysis['below_summary'])
 
     with tab3:
