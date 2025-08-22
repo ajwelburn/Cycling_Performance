@@ -537,9 +537,15 @@ if 'results' in st.session_state:
         st.subheader("Overall Ride Metrics")
         c1, c2, c3 = st.columns(3)
         avg_power_w_kg_val = metrics.get('avg_power_w_kg')
-        c1.metric("Total Distance", f"{metrics.get('total_distance', 'N/A')} km")
-        c2.metric("Average Power", f"{metrics.get('avg_power_overall', 'N/A')} W", f"{avg_power_w_kg_val} W/kg" if avg_power_w_kg_val is not None else None, delta_color="off")
-        c3.metric("Average Speed", f"{metrics.get('avg_speed_overall', 'N/A')} km/h")
+        
+        with c1:
+            st.metric("Total Distance", f"{metrics.get('total_distance', 'N/A')} km")
+        with c2:
+            st.metric("Average Power", f"{metrics.get('avg_power_overall', 'N/A')} W")
+            if avg_power_w_kg_val is not None:
+                st.markdown(f"<p style='color:green; font-size: 0.9em; margin-top: -10px;'>{avg_power_w_kg_val} W/kg</p>", unsafe_allow_html=True)
+        with c3:
+            st.metric("Average Speed", f"{metrics.get('avg_speed_overall', 'N/A')} km/h")
 
         c4, c5, c6 = st.columns(3)
         total_work_val = metrics.get('total_work_kj')
@@ -547,9 +553,16 @@ if 'results' in st.session_state:
         total_work_per_kg_val = metrics.get('total_work_kj_per_kg')
         work_above_cp_per_kg_val = metrics.get('total_work_above_cp_kj_per_kg')
         
-        c4.metric("Total Work", f"{total_work_val} kJ" if total_work_val is not None else "N/A", f"{total_work_per_kg_val} kJ/kg" if total_work_per_kg_val is not None else None, delta_color="off")
-        c5.metric("Work Above CP", f"{work_above_cp_val} kJ" if work_above_cp_val is not None else "N/A", f"{work_above_cp_per_kg_val} kJ/kg" if work_above_cp_per_kg_val is not None else None, delta_color="off")
-        c6.metric("Coasting", f"{metrics.get('coasting_percent', 'N/A')}%")
+        with c4:
+            st.metric("Total Work", f"{total_work_val} kJ" if total_work_val is not None else "N/A")
+            if total_work_per_kg_val is not None:
+                st.markdown(f"<p style='color:green; font-size: 0.9em; margin-top: -10px;'>{total_work_per_kg_val} kJ/kg</p>", unsafe_allow_html=True)
+        with c5:
+            st.metric("Work Above CP", f"{work_above_cp_val} kJ" if work_above_cp_val is not None else "N/A")
+            if work_above_cp_per_kg_val is not None:
+                st.markdown(f"<p style='color:green; font-size: 0.9em; margin-top: -10px;'>{work_above_cp_per_kg_val} kJ/kg</p>", unsafe_allow_html=True)
+        with c6:
+            st.metric("Coasting", f"{metrics.get('coasting_percent', 'N/A')}%")
         
         st.divider()
         st.header(f"Power Analysis (Threshold = {int(CP)} W)")
@@ -924,3 +937,4 @@ elif not uploaded_file and analyze_button:
 else:
     if 'results' not in st.session_state:
         st.info("Upload a file and click 'Analyze Ride' to begin.")
+
