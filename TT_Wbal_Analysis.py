@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from typing import Tuple, List, Dict
 from datetime import datetime
-import requests # <-- [FIX] Added missing import
+import requests
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 # --- Constants ---
-SEMICIRCLES_TO_DEGREES = 180 / (2**31) # <-- [IMPROVEMENT] Replaced magic number
+SEMICIRCLES_TO_DEGREES = 180 / (2**31)
 
 # --- 1. ANALYSIS FUNCTIONS (Cached for performance) ---
 
@@ -109,7 +109,7 @@ def get_weather_data(lat: float, lon: float, start_time: datetime) -> Dict:
     if lat is None or lon is None or not isinstance(start_time, datetime):
         return None
     
-    try: # <-- [IMPROVEMENT] Specific error handling
+    try:
         date_str = start_time.strftime('%Y-%m-%d')
         url = (
             f"https://archive-api.open-meteo.com/v1/archive?latitude={lat:.4f}&longitude={lon:.4f}"
@@ -348,7 +348,7 @@ if analyze_button:
                     Wbal_old = Wbal
                 df['Wbal'] = wbal_list
 
-                # --- [REFACTOR] VECTORIZED POWER AND CADENCE ANALYSIS ---
+                # --- VECTORIZED POWER AND CADENCE ANALYSIS ---
                 metrics = {}
                 df['state'] = np.where(df['power'] > CP, 'above', 'below')
                 
@@ -447,30 +447,33 @@ if 'results' in st.session_state:
 
         st.divider()
         st.subheader("Overall Ride Metrics")
-        # --- [NEW] Updated Metrics Layout ---
         c1, c2, c3 = st.columns(3)
-        c1.metric("Total Distance", f"{metrics['total_distance']} km")
-        c2.metric("Average Power", f"{metrics['avg_power_overall']} W")
-        c3.metric("Average Speed", f"{metrics['avg_speed_overall']} km/h")
+        c1.metric("Total Distance", f"{metrics.get('total_distance', 'N/A')} km")
+        c2.metric("Average Power", f"{metrics.get('avg_power_overall', 'N/A')} W")
+        c3.metric("Average Speed", f"{metrics.get('avg_speed_overall', 'N/A')} km/h")
 
         c4, c5, c6 = st.columns(3)
-        c4.metric("Total Work", f"{metrics['total_work_kj']} kJ")
-        c5.metric("Work Above CP", f"{metrics['total_work_above_cp_kj']} kJ")
-        c6.metric("Coasting", f"{metrics['coasting_percent']}%")
+        # --- [FIX] Use .get() to prevent KeyError ---
+        total_work_val = metrics.get('total_work_kj', 'N/A')
+        work_above_cp_val = metrics.get('total_work_above_cp_kj', 'N/A')
+        
+        c4.metric("Total Work", f"{total_work_val} kJ" if isinstance(total_work_val, (int, float)) else "N/A")
+        c5.metric("Work Above CP", f"{work_above_cp_val} kJ" if isinstance(work_above_cp_val, (int, float)) else "N/A")
+        c6.metric("Coasting", f"{metrics.get('coasting_percent', 'N/A')}%")
         
         st.divider()
         st.header(f"Power Analysis (Threshold = {int(CP)} W)")
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("##### Above CP")
-            st.metric("Total Time", format_seconds_to_hms(metrics['total_time_above']))
-            st.metric("Avg Power", f"{metrics['avg_power_above']} W")
-            st.metric("Number of Bouts", f"{metrics['bouts_above']}")
+            st.metric("Total Time", format_seconds_to_hms(metrics.get('total_time_above', 0)))
+            st.metric("Avg Power", f"{metrics.get('avg_power_above', 'N/A')} W")
+            st.metric("Number of Bouts", f"{metrics.get('bouts_above', 'N/A')}")
         with col2:
             st.markdown("##### Below or At CP")
-            st.metric("Total Time", format_seconds_to_hms(metrics['total_time_below']))
-            st.metric("Avg Power", f"{metrics['avg_power_below']} W")
-            st.metric("Number of Bouts", f"{metrics['bouts_below']}")
+            st.metric("Total Time", format_seconds_to_hms(metrics.get('total_time_below', 0)))
+            st.metric("Avg Power", f"{metrics.get('avg_power_below', 'N/A')} W")
+            st.metric("Number of Bouts", f"{metrics.get('bouts_below', 'N/A')}")
 
     with tab2:
         st.header("Interval Analysis")
@@ -530,7 +533,6 @@ if 'results' in st.session_state:
             magnitude = (power_depletion / CP) * 100
             fig_matches.add_trace(go.Scatter(x=durations, y=magnitude, mode='lines', line=dict(dash='dot', color='grey'), name=f'{depletion}% W\' depletion'))
 
-        # --- [NEW] Move legend to bottom ---
         fig_matches.update_layout(
             title_text='Match Magnitude vs. Duration', 
             template='plotly_white', 
@@ -573,7 +575,6 @@ if 'results' in st.session_state:
         mmp_df = power_profile["mmp"]
         st.subheader("Mean Maximal Power")
         
-        # --- [NEW] Revamped MMP display ---
         key_durations = {"5s": 5, "1 min": 60, "5 min": 300, "20 min": 1200}
         mmp_data = mmp_df.set_index("Duration (s)")["Max Power (W)"]
         
@@ -601,14 +602,13 @@ if 'results' in st.session_state:
     with tab6:
         st.header("Route Maps")
         if 'position_lat' in df.columns and 'position_long' in df.columns and not df[['position_lat', 'position_long']].dropna().empty:
-            gps_df = df[['position_lat', 'position_long', 'Wbal', 'power', 'speed_kmh']].dropna().copy()
+            gps_df = df[['position_lat', 'position_long', 'Wbal']].dropna().copy()
             
             st.subheader("Route Colored by W' Balance (%)")
             gps_df['Wbal_percent'] = (gps_df['Wbal'] / WP) * 100
             gps_df['Wbal_percent'] = gps_df['Wbal_percent'].clip(0, 100)
             
-            # --- [NEW] Reversed colormap ---
-            wbal_colormap = cm.LinearColormap(colors=['blue', 'cyan', 'yellow', 'red'], vmin=0, vmax=100)
+            wbal_colormap = cm.LinearColormap(colors=['red', 'yellow', 'green', 'blue'], vmin=0, vmax=100)
             
             m_wbal = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB positron')
             for i in range(len(gps_df) - 1):
@@ -616,7 +616,7 @@ if 'results' in st.session_state:
                           gps_df[['position_lat', 'position_long']].iloc[i+1].values)
                 avg_wbal_percent = (gps_df['Wbal_percent'].iloc[i] + gps_df['Wbal_percent'].iloc[i+1]) / 2
                 folium.PolyLine([p1, p2], color=wbal_colormap(avg_wbal_percent), weight=5).add_to(m_wbal)
-            wbal_colormap.caption = "W' Balance (%) (Blue=Empty, Red=Full)"
+            wbal_colormap.caption = "W' Balance (%) (Red=Empty, Blue=Full)"
             m_wbal.add_child(wbal_colormap)
             st_folium(m_wbal, width=1400, height=500)
         else:
