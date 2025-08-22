@@ -280,34 +280,46 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
     
     return pd.DataFrame(match_data), summary
 
-# --- [EDIT] Updated function to include max duration ---
 @st.cache_data
-def find_w_depletion_bouts(df: pd.DataFrame, w_prime: float, depletion_threshold_percent: int, max_duration_s: int) -> List[Dict]:
-    """Identifies all efforts that deplete W' by a given percentage within a max duration."""
+def find_w_depletion_bouts(df: pd.DataFrame, w_prime: float, depletion_threshold_percent: int, max_duration_s: int, recovery_tolerance_s: int) -> List[Dict]:
+    """Identifies all efforts that deplete W' by a given percentage within a max duration, allowing for short recoveries."""
     bouts = []
     in_bout = False
     bout_start_index = 0
+    recovery_counter = 0
     
     df['wbal_delta'] = df['Wbal'].diff()
     
     for i in range(1, len(df)):
-        if not in_bout and df['wbal_delta'].iloc[i] < 0:
-            in_bout = True
-            bout_start_index = i - 1
-        elif in_bout and (df['wbal_delta'].iloc[i] >= 0 or i == len(df) - 1):
-            in_bout = False
-            bout_end_index = i
-            
-            duration = bout_end_index - bout_start_index
-            
-            wbal_start = df['Wbal'].iloc[bout_start_index]
-            wbal_end = df['Wbal'].iloc[bout_end_index]
-            
-            w_prime_depleted = wbal_start - wbal_end
-            depletion_percent = (w_prime_depleted / w_prime) * 100 if w_prime > 0 else 0
-            
-            if depletion_percent >= depletion_threshold_percent and duration <= max_duration_s:
-                bouts.append({'start': bout_start_index, 'end': bout_end_index, 'depletion': depletion_percent})
+        # Start of a depletion phase
+        if df['wbal_delta'].iloc[i] < 0:
+            if not in_bout:
+                in_bout = True
+                bout_start_index = i - 1
+            recovery_counter = 0 # Reset recovery counter on any depletion
+        
+        # Potential end of a depletion phase (i.e., recovery)
+        elif in_bout:
+            recovery_counter += 1
+            # End the bout only if recovery is sustained or it's the end of the ride
+            if recovery_counter > recovery_tolerance_s or i == len(df) - 1:
+                in_bout = False
+                # The actual end of the effort was before the recovery period started
+                bout_end_index = i - recovery_counter 
+                
+                duration = bout_end_index - bout_start_index
+                
+                if duration > 0:
+                    wbal_start = df['Wbal'].iloc[bout_start_index]
+                    wbal_end = df['Wbal'].iloc[bout_end_index]
+                    
+                    w_prime_depleted = wbal_start - wbal_end
+                    depletion_percent = (w_prime_depleted / w_prime) * 100 if w_prime > 0 else 0
+                    
+                    if depletion_percent >= depletion_threshold_percent and duration <= max_duration_s:
+                        bouts.append({'start': bout_start_index, 'end': bout_end_index, 'depletion': depletion_percent})
+                
+                recovery_counter = 0 # Reset for the next potential bout
                 
     return bouts
 
@@ -557,8 +569,8 @@ if 'results' in st.session_state:
         st.header("Interval Analysis")
         st.subheader("Top Bouts vs. Power and W'bal")
         fig_intervals = make_subplots(specs=[[{"secondary_y": True}]])
-        fig_intervals.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='grey', width=1)), secondary_y=False)
-        fig_intervals.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=True)
+        fig_intervals.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=False)
+        fig_intervals.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='grey', width=1)), secondary_y=True)
         
         fig_intervals.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(color='rgba(214, 39, 40, 0.4)'), name='Top Effort'))
         fig_intervals.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(color='rgba(31, 119, 180, 0.4)'), name='Top Recovery'))
@@ -570,8 +582,8 @@ if 'results' in st.session_state:
 
         fig_intervals.update_layout(template='plotly_white', font=dict(color="black"), showlegend=True)
         fig_intervals.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
-        fig_intervals.update_yaxes(title_text="Power (W)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False)
-        fig_intervals.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
+        fig_intervals.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False)
+        fig_intervals.update_yaxes(title_text="Power (W)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
         st.plotly_chart(fig_intervals, use_container_width=True)
 
         st.dataframe(interval_analysis['above_summary'])
@@ -579,28 +591,29 @@ if 'results' in st.session_state:
         st.divider()
 
         st.subheader("W' Depletion Analysis")
-        # --- [EDIT] Added duration slider ---
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             depletion_threshold = st.slider("Highlight efforts that deplete W' by at least:", 20, 90, 40, format="%d%%")
         with col2:
             max_duration = st.slider("Max duration of effort (seconds):", 1, 600, 300)
+        with col3:
+            recovery_tolerance = st.slider("Recovery Tolerance (s):", 1, 30, 5, help="Allowable recovery time within an effort before it's considered ended.")
 
-        depletion_bouts = find_w_depletion_bouts(df, WP, depletion_threshold, max_duration)
+        depletion_bouts = find_w_depletion_bouts(df, WP, depletion_threshold, max_duration, recovery_tolerance)
         
-        st.markdown(f"Found **{len(depletion_bouts)}** efforts that depleted W' by more than {depletion_threshold}% within **{max_duration} seconds**.")
+        st.markdown(f"Found **{len(depletion_bouts)}** efforts that met the criteria.")
 
         fig_depletion = make_subplots(specs=[[{"secondary_y": True}]])
-        fig_depletion.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='grey', width=1)), secondary_y=False)
-        fig_depletion.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=True)
+        fig_depletion.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=False)
+        fig_depletion.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='grey', width=1)), secondary_y=True)
 
         for bout in depletion_bouts:
             fig_depletion.add_vrect(x0=df['time'].iloc[bout['start']], x1=df['time'].iloc[bout['end']], fillcolor="rgba(255, 165, 0, 0.3)", layer="below", line_width=0)
 
         fig_depletion.update_layout(title_text=f"Efforts Depleting W' > {depletion_threshold}%", template='plotly_white', font=dict(color="black"), showlegend=True)
         fig_depletion.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
-        fig_depletion.update_yaxes(title_text="Power (W)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False)
-        fig_depletion.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
+        fig_depletion.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False)
+        fig_depletion.update_yaxes(title_text="Power (W)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
         st.plotly_chart(fig_depletion, use_container_width=True)
 
 
@@ -842,21 +855,31 @@ if 'results' in st.session_state:
         st.warning("These features are experimental and may not be fully accurate. Use with caution.")
         
         st.subheader("Pacing Analysis (by Duration)")
-        midpoint_time = df['time'].max() / 2
-        first_half = df[df['time'] <= midpoint_time]
-        second_half = df[df['time'] > midpoint_time]
+        if not df.empty and df['time'].max() > 0:
+            midpoint_time = df['time'].max() / 2
+            first_half = df[df['time'] <= midpoint_time]
+            second_half = df[df['time'] > midpoint_time]
 
-        pacing_cols = st.columns(2)
-        with pacing_cols[0]:
-            st.markdown("#### First Half")
-            st.metric("Avg Power", f"{round(first_half['power'].mean())} W")
-            st.metric("Avg Speed", f"{first_half['speed_kmh'].mean():.1f} km/h")
-            st.metric("Avg Cadence", f"{round(first_half[first_half['cadence'] > 0]['cadence'].mean())} rpm")
-        with pacing_cols[1]:
-            st.markdown("#### Second Half")
-            st.metric("Avg Power", f"{round(second_half['power'].mean())} W")
-            st.metric("Avg Speed", f"{second_half['speed_kmh'].mean():.1f} km/h")
-            st.metric("Avg Cadence", f"{round(second_half[second_half['cadence'] > 0]['cadence'].mean())} rpm")
+            pacing_cols = st.columns(2)
+            with pacing_cols[0]:
+                st.markdown("#### First Half")
+                if not first_half.empty:
+                    st.metric("Avg Power", f"{round(first_half['power'].mean())} W")
+                    st.metric("Avg Speed", f"{first_half['speed_kmh'].mean():.1f} km/h")
+                    st.metric("Avg Cadence", f"{round(first_half[first_half['cadence'] > 0]['cadence'].mean()) if not first_half[first_half['cadence'] > 0].empty else 0} rpm")
+                else:
+                    st.write("No data in the first half.")
+            with pacing_cols[1]:
+                st.markdown("#### Second Half")
+                if not second_half.empty:
+                    st.metric("Avg Power", f"{round(second_half['power'].mean())} W")
+                    st.metric("Avg Speed", f"{second_half['speed_kmh'].mean():.1f} km/h")
+                    st.metric("Avg Cadence", f"{round(second_half[second_half['cadence'] > 0]['cadence'].mean()) if not second_half[second_half['cadence'] > 0].empty else 0} rpm")
+                else:
+                    st.write("No data in the second half.")
+        else:
+            st.info("Not enough data for pacing analysis.")
+
 
         st.divider()
 
