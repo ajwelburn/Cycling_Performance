@@ -156,7 +156,6 @@ def calculate_power_zones(power_data: pd.Series, cp: int) -> pd.DataFrame:
 @st.cache_data
 def calculate_mmp_curve(power_data: pd.Series, weight: float) -> pd.DataFrame:
     """Calculates the Mean Maximal Power (MMP) curve in W and W/kg."""
-    # --- [EDIT] Added more specific durations ---
     durations = sorted(list(set([1, 5, 10, 20, 30, 60, 120, 180, 300, 480, 600, 720, 1200, 1800, 3600])))
     mmp_w = {d: power_data.rolling(window=d).mean().max() for d in durations if len(power_data) >= d}
     
@@ -281,6 +280,36 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
     
     return pd.DataFrame(match_data), summary
 
+# --- [NEW] Function to find high W' depletion efforts ---
+@st.cache_data
+def find_w_depletion_bouts(df: pd.DataFrame, w_prime: float, depletion_threshold_percent: int) -> List[Dict]:
+    """Identifies all efforts that deplete W' by a given percentage."""
+    bouts = []
+    in_bout = False
+    bout_start_index = 0
+    
+    df['wbal_delta'] = df['Wbal'].diff()
+    
+    for i in range(1, len(df)):
+        # Bout starts when W'bal starts decreasing
+        if not in_bout and df['wbal_delta'].iloc[i] < 0:
+            in_bout = True
+            bout_start_index = i - 1
+        # Bout ends when W'bal starts increasing (or ride ends)
+        elif in_bout and (df['wbal_delta'].iloc[i] >= 0 or i == len(df) - 1):
+            in_bout = False
+            bout_end_index = i
+            
+            wbal_start = df['Wbal'].iloc[bout_start_index]
+            wbal_end = df['Wbal'].iloc[bout_end_index]
+            
+            w_prime_depleted = wbal_start - wbal_end
+            depletion_percent = (w_prime_depleted / w_prime) * 100 if w_prime > 0 else 0
+            
+            if depletion_percent >= depletion_threshold_percent:
+                bouts.append({'start': bout_start_index, 'end': bout_end_index, 'depletion': depletion_percent})
+                
+    return bouts
 
 def get_time_of_day(hour: int) -> str:
     """Categorizes the hour into Morning, Afternoon, or Evening."""
@@ -451,7 +480,6 @@ if 'results' in st.session_state:
         with col1:
             st.markdown("👨‍🔬")
         with col2:
-            # --- [EDIT] Compacted "About" section ---
             st.markdown(
                 """
                 This tool utilizes a W' balance model based on the research by Alex Welburn, PhD. 
@@ -472,8 +500,7 @@ if 'results' in st.session_state:
             st.subheader("Weather Conditions")
             if ride_info["weather"]:
                 weather = ride_info["weather"]
-                temp = weather.get('temperature') # Use .get() to avoid KeyError
-                # --- [FIX] Check if temp is a number before comparison ---
+                temp = weather.get('temperature')
                 if isinstance(temp, (int, float)):
                     thermo_emoji = "🔥" if temp > 25 else "☀️" if temp > 18 else "⛅"
                     st.metric(f"Temperature {thermo_emoji}", f"{temp}°C")
@@ -486,21 +513,19 @@ if 'results' in st.session_state:
         st.divider()
         st.subheader("Overall Ride Metrics")
         c1, c2, c3 = st.columns(3)
-        avg_power_w_kg_val = metrics.get('avg_power_w_kg', 'N/A')
+        avg_power_w_kg_val = metrics.get('avg_power_w_kg')
         c1.metric("Total Distance", f"{metrics.get('total_distance', 'N/A')} km")
-        # --- [EDIT] Added W/kg to Avg Power metric ---
-        c2.metric("Average Power", f"{metrics.get('avg_power_overall', 'N/A')} W", f"{avg_power_w_kg_val} W/kg" if isinstance(avg_power_w_kg_val, (int, float)) else None)
+        c2.metric("Average Power", f"{metrics.get('avg_power_overall', 'N/A')} W", f"{avg_power_w_kg_val} W/kg" if avg_power_w_kg_val is not None else None, delta_color="off")
         c3.metric("Average Speed", f"{metrics.get('avg_speed_overall', 'N/A')} km/h")
 
         c4, c5, c6 = st.columns(3)
-        total_work_val = metrics.get('total_work_kj', 'N/A')
-        work_above_cp_val = metrics.get('total_work_above_cp_kj', 'N/A')
-        total_work_per_kg_val = metrics.get('total_work_kj_per_kg', 'N/A')
-        work_above_cp_per_kg_val = metrics.get('total_work_above_cp_kj_per_kg', 'N/A')
+        total_work_val = metrics.get('total_work_kj')
+        work_above_cp_val = metrics.get('total_work_above_cp_kj')
+        total_work_per_kg_val = metrics.get('total_work_kj_per_kg')
+        work_above_cp_per_kg_val = metrics.get('total_work_above_cp_kj_per_kg')
         
-        # --- [EDIT] Removed delta from work metrics ---
-        c4.metric("Total Work", f"{total_work_val} kJ", help=f"{total_work_per_kg_val} kJ/kg" if isinstance(total_work_per_kg_val, (int, float)) else None)
-        c5.metric("Work Above CP", f"{work_above_cp_val} kJ", help=f"{work_above_cp_per_kg_val} kJ/kg" if isinstance(work_above_cp_per_kg_val, (int, float)) else None)
+        c4.metric("Total Work", f"{total_work_val} kJ" if total_work_val is not None else "N/A", f"{total_work_per_kg_val} kJ/kg" if total_work_per_kg_val is not None else None, delta_color="off")
+        c5.metric("Work Above CP", f"{work_above_cp_val} kJ" if work_above_cp_val is not None else "N/A", f"{work_above_cp_per_kg_val} kJ/kg" if work_above_cp_per_kg_val is not None else None, delta_color="off")
         c6.metric("Coasting", f"{metrics.get('coasting_percent', 'N/A')}%")
         
         st.divider()
@@ -519,6 +544,7 @@ if 'results' in st.session_state:
         
     with tab2:
         st.header("Interval Analysis")
+        st.subheader("Top Bouts vs. Power and W'bal")
         fig_intervals = make_subplots(specs=[[{"secondary_y": True}]])
         fig_intervals.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='grey', width=1)), secondary_y=False)
         fig_intervals.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=True)
@@ -531,16 +557,37 @@ if 'results' in st.session_state:
         for bout in interval_analysis['below_bouts']:
             fig_intervals.add_vrect(x0=df['time'].iloc[bout['start']], x1=df['time'].iloc[bout['end']], fillcolor="blue", opacity=0.2, layer="below", line_width=0)
 
-        fig_intervals.update_layout(title_text='Top Bouts vs. Power and W\'bal', template='plotly_white', font=dict(color="black"), showlegend=True)
+        fig_intervals.update_layout(template='plotly_white', font=dict(color="black"), showlegend=True)
         fig_intervals.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
         fig_intervals.update_yaxes(title_text="Power (W)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False)
         fig_intervals.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
         st.plotly_chart(fig_intervals, use_container_width=True)
 
-        st.subheader("Top 3 Efforts (>CP)")
         st.dataframe(interval_analysis['above_summary'])
-        st.subheader("Top 3 Recovery Bouts (<=CP)")
         st.dataframe(interval_analysis['below_summary'])
+        st.divider()
+
+        # --- [NEW] W' Depletion Analysis Section ---
+        st.subheader("W' Depletion Analysis")
+        depletion_threshold = st.slider("Highlight efforts that deplete W' by at least:", 20, 90, 40, format="%d%%")
+        
+        depletion_bouts = find_w_depletion_bouts(df, WP, depletion_threshold)
+        
+        st.markdown(f"Found **{len(depletion_bouts)}** efforts that depleted W' by more than {depletion_threshold}%.")
+
+        fig_depletion = make_subplots(specs=[[{"secondary_y": True}]])
+        fig_depletion.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='grey', width=1)), secondary_y=False)
+        fig_depletion.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=True)
+
+        for bout in depletion_bouts:
+            fig_depletion.add_vrect(x0=df['time'].iloc[bout['start']], x1=df['time'].iloc[bout['end']], fillcolor="rgba(255, 165, 0, 0.3)", layer="below", line_width=0)
+
+        fig_depletion.update_layout(title_text=f"Efforts Depleting W' > {depletion_threshold}%", template='plotly_white', font=dict(color="black"), showlegend=True)
+        fig_depletion.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
+        fig_depletion.update_yaxes(title_text="Power (W)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False)
+        fig_depletion.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
+        st.plotly_chart(fig_depletion, use_container_width=True)
+
 
     with tab3:
         st.header("Match Analysis")
@@ -622,7 +669,6 @@ if 'results' in st.session_state:
     with tab5:
         st.header("Power Profile")
         zones_df = power_profile["zones"]
-        # --- [EDIT] Added formatted time to zones chart ---
         zones_df['Time (HMS)'] = zones_df['Time (s)'].apply(format_seconds_to_hms)
         zones_df['Chart Text'] = zones_df.apply(lambda row: f"{row['Time (HMS)']} ({row['Percentage']:.1f}%)", axis=1)
         
@@ -635,7 +681,6 @@ if 'results' in st.session_state:
         mmp_df = power_profile["mmp"]
         st.subheader("Mean Maximal Power (Watts)")
         
-        # --- [EDIT] Expanded key durations for MMP ---
         key_durations = {"5s": 5, "20s": 20, "1 min": 60, "3 min": 180, "5 min": 300, "8 min": 480, "12 min": 720, "20 min": 1200}
         mmp_data_w = mmp_df.set_index("Duration (s)")["Max Power (W)"]
         
