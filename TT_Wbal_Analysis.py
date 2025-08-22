@@ -211,12 +211,62 @@ def analyze_bouts(df: pd.DataFrame, bouts: List[Dict], bout_type: str, cp: int) 
         
     return pd.DataFrame(summary)
 
+@st.cache_data
+def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: int) -> Tuple[pd.DataFrame, Dict]:
+    """Identifies and analyzes 'matches' burned above a threshold."""
+    threshold_power = cp * 1.05
+    matches = []
+    current_match = None
+    below_counter = 0
+
+    for i in range(len(df)):
+        power = df['power'].iloc[i]
+        
+        if power > threshold_power:
+            if current_match is None:
+                current_match = {'start': i, 'powers': [power]}
+            else:
+                current_match['powers'].append(power)
+            below_counter = 0
+        else:
+            if current_match is not None:
+                below_counter += 1
+                if below_counter > gap_tolerance:
+                    if len(current_match['powers']) > 0:
+                        matches.append(current_match)
+                    current_match = None
+    
+    if current_match and len(current_match['powers']) > 0:
+        matches.append(current_match)
+
+    match_data = []
+    for match in matches:
+        duration = len(match['powers'])
+        avg_power = sum(match['powers']) / duration
+        magnitude = (avg_power / cp) * 100
+        match_data.append({"Duration (s)": duration, "Magnitude (%CP)": magnitude})
+
+    summary = {
+        "Total Matches": len(match_data),
+        "Avg Duration (s)": np.mean([m["Duration (s)"] for m in match_data]) if match_data else 0,
+        "Avg Magnitude (%CP)": np.mean([m["Magnitude (%CP)"] for m in match_data]) if match_data else 0
+    }
+    
+    return pd.DataFrame(match_data), summary
+
 
 def get_time_of_day(hour: int) -> str:
     """Categorizes the hour into Morning, Afternoon, or Evening."""
     if 5 <= hour < 12: return "Morning"
     elif 12 <= hour < 18: return "Afternoon"
     else: return "Evening"
+    
+def format_seconds_to_min_sec(seconds: float) -> str:
+    """Converts seconds into a 'X min Y s' format."""
+    seconds = round(seconds)
+    minutes = seconds // 60
+    remaining_seconds = seconds % 60
+    return f"{minutes} min {remaining_seconds} s"
 
 # --- Main App Interface ---
 st.title("🚴 W' Balance and Time Trial Analysis Tool")
@@ -356,7 +406,7 @@ if 'results' in st.session_state:
     CP, WP = params["CP"], params["WP"]
     df['wbal_kj'] = df['Wbal'] / 1000
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Summary", "🏃 Interval Analysis", "📈 Ride Profile", "⚡ Power Profile", "🗺️ Route Maps", "⚙️ Data Explorer", "📋 Raw Data Explorer"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["📊 Summary", "🏃 Interval Analysis", "🔥 Match Analysis", "📈 Ride Profile", "⚡ Power Profile", "🗺️ Route Maps", "⚙️ Data Explorer", "📋 Raw Data Explorer"])
 
     with tab1:
         st.header("Ride Summary")
@@ -391,12 +441,12 @@ if 'results' in st.session_state:
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("##### Above CP")
-            st.metric("Total Time", f"{round(metrics['total_time_above'])} s")
+            st.metric("Total Time", format_seconds_to_min_sec(metrics['total_time_above']))
             st.metric("Avg Power", f"{metrics['avg_power_above']} W")
             st.metric("Number of Bouts", f"{metrics['bouts_above']}")
         with col2:
             st.markdown("##### Below or At CP")
-            st.metric("Total Time", f"{round(metrics['total_time_below'])} s")
+            st.metric("Total Time", format_seconds_to_min_sec(metrics['total_time_below']))
             st.metric("Avg Power", f"{metrics['avg_power_below']} W")
             st.metric("Number of Bouts", f"{metrics['bouts_below']}")
 
@@ -426,6 +476,32 @@ if 'results' in st.session_state:
         st.dataframe(interval_analysis['below_summary'])
 
     with tab3:
+        st.header("Match Analysis")
+        gap_tolerance = st.slider("Gap Tolerance (s)", min_value=0, max_value=10, value=3, help="Allowable time below threshold before ending a 'match'.")
+        
+        matches_df, matches_summary = calculate_matches(df, CP, WP, gap_tolerance)
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Matches Burned", f"{matches_summary['Total Matches']}")
+        col2.metric("Avg Match Duration", f"{matches_summary['Avg Duration (s)']:.1f} s")
+        col3.metric("Avg Match Magnitude", f"{matches_summary['Avg Magnitude (%CP)']:.1f}%")
+
+        fig_matches = go.Figure()
+        fig_matches.add_trace(go.Scatter(x=matches_df['Duration (s)'], y=matches_df['Magnitude (%CP)'], mode='markers', name='Matches'))
+
+        # Add W' depletion curves
+        for depletion in range(10, 60, 10):
+            durations = np.arange(1, 71)
+            power_depletion = (WP * (depletion / 100) / durations) + CP
+            magnitude = (power_depletion / CP) * 100
+            fig_matches.add_trace(go.Scatter(x=durations, y=magnitude, mode='lines', line=dict(dash='dot', color='grey'), name=f'{depletion}% W\' depletion'))
+
+        fig_matches.update_layout(title_text='Match Magnitude vs. Duration', template='plotly_white', font=dict(color="black"))
+        fig_matches.update_xaxes(title_text='Duration (s)', showline=True, linewidth=2, linecolor='black', mirror=False)
+        fig_matches.update_yaxes(title_text='Magnitude (% of CP)', showline=True, linewidth=2, linecolor='black', mirror=False, range=[105, 250])
+        st.plotly_chart(fig_matches, use_container_width=True)
+
+    with tab4:
         st.header("Ride Profile Charts")
         fig_wbal = make_subplots(specs=[[{"secondary_y": True}]])
         fig_wbal.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=False)
@@ -445,7 +521,7 @@ if 'results' in st.session_state:
         fig_power.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
         st.plotly_chart(fig_power, use_container_width=True)
 
-    with tab4:
+    with tab5:
         st.header("Power Profile")
         zones_df = power_profile["zones"]
         fig_zones = go.Figure(go.Bar(x=zones_df['Time (s)'], y=zones_df['Zone'], orientation='h', text=zones_df['Percentage'].apply(lambda x: f'{x:.1f}%')))
@@ -455,6 +531,9 @@ if 'results' in st.session_state:
         st.plotly_chart(fig_zones, use_container_width=True)
         
         mmp_df = power_profile["mmp"]
+        st.subheader("Mean Maximal Power Data")
+        st.dataframe(mmp_df.style.format({"Max Power (W)": "{:.0f}"}))
+
         fig_mmp = go.Figure(go.Scatter(x=mmp_df['Duration (s)'], y=mmp_df['Max Power (W)'], mode='lines+markers'))
         fig_mmp.update_layout(title_text='Mean Maximal Power (MMP) Curve', template='plotly_white', font=dict(color="black"),
                               xaxis_type="log",
@@ -467,7 +546,7 @@ if 'results' in st.session_state:
         fig_mmp.update_yaxes(title_text='Max Power (W)', showline=True, linewidth=2, linecolor='black', mirror=False)
         st.plotly_chart(fig_mmp, use_container_width=True)
 
-    with tab5:
+    with tab6:
         st.header("Route Maps")
         if 'position_lat' in df.columns and 'position_long' in df.columns and not df[['position_lat', 'position_long']].dropna().empty:
             gps_df = df[['position_lat', 'position_long', 'Wbal', 'power', 'speed_kmh']].dropna().copy()
@@ -488,7 +567,7 @@ if 'results' in st.session_state:
         else:
             st.warning("No GPS data found in the file to generate maps.")
 
-    with tab6:
+    with tab7:
         st.header("Interactive Data Explorer")
         available_metrics = ['Power', 'Speed (km/h)']
         if 'cadence' in df.columns and df['cadence'].sum() > 0: available_metrics.append('Cadence')
@@ -514,7 +593,7 @@ if 'results' in st.session_state:
             fig_explorer.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
             st.plotly_chart(fig_explorer, use_container_width=True)
             
-    with tab7:
+    with tab8:
         st.header("Raw Data Explorer")
         
         cols_to_show = [col for col in ['power', 'cadence', 'heart_rate', 'altitude', 'speed_kmh', 'temperature'] if col in df.columns and df[col].notna().any()]
@@ -536,4 +615,3 @@ elif not uploaded_file and analyze_button:
 else:
     if 'results' not in st.session_state:
         st.info("Upload a file and click 'Analyze Ride' to begin.")
-
