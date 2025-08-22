@@ -280,10 +280,10 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
     
     return pd.DataFrame(match_data), summary
 
-# --- [NEW] Function to find high W' depletion efforts ---
+# --- [EDIT] Updated function to include max duration ---
 @st.cache_data
-def find_w_depletion_bouts(df: pd.DataFrame, w_prime: float, depletion_threshold_percent: int) -> List[Dict]:
-    """Identifies all efforts that deplete W' by a given percentage."""
+def find_w_depletion_bouts(df: pd.DataFrame, w_prime: float, depletion_threshold_percent: int, max_duration_s: int) -> List[Dict]:
+    """Identifies all efforts that deplete W' by a given percentage within a max duration."""
     bouts = []
     in_bout = False
     bout_start_index = 0
@@ -291,14 +291,14 @@ def find_w_depletion_bouts(df: pd.DataFrame, w_prime: float, depletion_threshold
     df['wbal_delta'] = df['Wbal'].diff()
     
     for i in range(1, len(df)):
-        # Bout starts when W'bal starts decreasing
         if not in_bout and df['wbal_delta'].iloc[i] < 0:
             in_bout = True
             bout_start_index = i - 1
-        # Bout ends when W'bal starts increasing (or ride ends)
         elif in_bout and (df['wbal_delta'].iloc[i] >= 0 or i == len(df) - 1):
             in_bout = False
             bout_end_index = i
+            
+            duration = bout_end_index - bout_start_index
             
             wbal_start = df['Wbal'].iloc[bout_start_index]
             wbal_end = df['Wbal'].iloc[bout_end_index]
@@ -306,7 +306,7 @@ def find_w_depletion_bouts(df: pd.DataFrame, w_prime: float, depletion_threshold
             w_prime_depleted = wbal_start - wbal_end
             depletion_percent = (w_prime_depleted / w_prime) * 100 if w_prime > 0 else 0
             
-            if depletion_percent >= depletion_threshold_percent:
+            if depletion_percent >= depletion_threshold_percent and duration <= max_duration_s:
                 bouts.append({'start': bout_start_index, 'end': bout_end_index, 'depletion': depletion_percent})
                 
     return bouts
@@ -350,6 +350,9 @@ with st.sidebar:
     if manual_time_override:
         manual_date = st.date_input("Select ride date", value=datetime.now())
         manual_time = st.time_input("Select ride start time", value=datetime.now().time())
+    
+    with st.expander("🧪 Ride Comparison"):
+        uploaded_file_2 = st.file_uploader("Choose a second .fit file to compare", type="fit")
 
     analyze_button = st.button("Analyze Ride", type="primary")
 
@@ -455,6 +458,13 @@ if analyze_button:
                     "params": {"CP": CP, "WP": WP, "Weight": weight},
                     "ride_info": {"start_time": start_time, "weather": weather_data}
                 }
+                
+                if uploaded_file_2:
+                    file_content_2 = uploaded_file_2.getvalue()
+                    df2, _, _ = parse_fit_file(file_content_2)
+                    if not df2.empty:
+                        st.session_state.results["df2"] = df2
+
     else:
         st.warning("Please upload a .fit file first.")
 
@@ -470,9 +480,10 @@ if 'results' in st.session_state:
     CP, WP, weight = params["CP"], params["WP"], params["Weight"]
     df['wbal_kj'] = df['Wbal'] / 1000
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["📊 Summary", "🏃 Interval Analysis", "🔥 Match Analysis", "📈 Ride Profile", "⚡ Power Profile", "🗺️ Route Maps", "⚙️ Data Explorer", "📋 Raw Data Explorer"])
+    tab_list = ["📊 Summary", "🏃 Interval Analysis", "🔥 Match Analysis", "📈 Ride Profile", "⚡ Power Profile", "🗺️ Route Maps", "⚙️ Data Explorer", "📋 Raw Data Explorer", "🧪 Beta Features"]
+    tabs = st.tabs(tab_list)
 
-    with tab1:
+    with tabs[0]: # Summary
         st.header("Ride Summary")
         
         st.subheader("About the Model")
@@ -542,7 +553,7 @@ if 'results' in st.session_state:
             st.metric("Avg Power", f"{metrics.get('avg_power_below', 'N/A')} W")
             st.metric("Number of Bouts", f"{metrics.get('bouts_below', 'N/A')}")
         
-    with tab2:
+    with tabs[1]: # Interval Analysis
         st.header("Interval Analysis")
         st.subheader("Top Bouts vs. Power and W'bal")
         fig_intervals = make_subplots(specs=[[{"secondary_y": True}]])
@@ -567,13 +578,17 @@ if 'results' in st.session_state:
         st.dataframe(interval_analysis['below_summary'])
         st.divider()
 
-        # --- [NEW] W' Depletion Analysis Section ---
         st.subheader("W' Depletion Analysis")
-        depletion_threshold = st.slider("Highlight efforts that deplete W' by at least:", 20, 90, 40, format="%d%%")
+        # --- [EDIT] Added duration slider ---
+        col1, col2 = st.columns(2)
+        with col1:
+            depletion_threshold = st.slider("Highlight efforts that deplete W' by at least:", 20, 90, 40, format="%d%%")
+        with col2:
+            max_duration = st.slider("Max duration of effort (seconds):", 1, 600, 300)
+
+        depletion_bouts = find_w_depletion_bouts(df, WP, depletion_threshold, max_duration)
         
-        depletion_bouts = find_w_depletion_bouts(df, WP, depletion_threshold)
-        
-        st.markdown(f"Found **{len(depletion_bouts)}** efforts that depleted W' by more than {depletion_threshold}%.")
+        st.markdown(f"Found **{len(depletion_bouts)}** efforts that depleted W' by more than {depletion_threshold}% within **{max_duration} seconds**.")
 
         fig_depletion = make_subplots(specs=[[{"secondary_y": True}]])
         fig_depletion.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='grey', width=1)), secondary_y=False)
@@ -589,7 +604,7 @@ if 'results' in st.session_state:
         st.plotly_chart(fig_depletion, use_container_width=True)
 
 
-    with tab3:
+    with tabs[2]: # Match Analysis
         st.header("Match Analysis")
         gap_tolerance = st.slider("Gap Tolerance (s)", min_value=0, max_value=10, value=3, help="Allowable time below threshold before ending a 'match'.")
         
@@ -646,7 +661,7 @@ if 'results' in st.session_state:
         fig_matches.update_yaxes(title_text='Magnitude (% of CP)', showline=True, linewidth=2, linecolor='black', mirror=False, range=[105, 250])
         st.plotly_chart(fig_matches, use_container_width=True)
 
-    with tab4:
+    with tabs[3]: # Ride Profile
         st.header("Ride Profile Charts")
         fig_wbal = make_subplots(specs=[[{"secondary_y": True}]])
         fig_wbal.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=False)
@@ -666,7 +681,7 @@ if 'results' in st.session_state:
         fig_power.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
         st.plotly_chart(fig_power, use_container_width=True)
 
-    with tab5:
+    with tabs[4]: # Power Profile
         st.header("Power Profile")
         zones_df = power_profile["zones"]
         zones_df['Time (HMS)'] = zones_df['Time (s)'].apply(format_seconds_to_hms)
@@ -754,7 +769,7 @@ if 'results' in st.session_state:
             st.plotly_chart(fig_mmp_wkg, use_container_width=True)
 
 
-    with tab6:
+    with tabs[5]: # Route Maps
         st.header("Route Maps")
         if 'position_lat' in df.columns and 'position_long' in df.columns and not df[['position_lat', 'position_long']].dropna().empty:
             gps_df = df[['position_lat', 'position_long', 'Wbal']].dropna().copy()
@@ -781,7 +796,7 @@ if 'results' in st.session_state:
         else:
             st.warning("No GPS data found in the file to generate maps.")
 
-    with tab7:
+    with tabs[6]: # Data Explorer
         st.header("Interactive Data Explorer")
         available_metrics = ['Power', 'Speed (km/h)']
         if 'cadence' in df.columns and df['cadence'].sum() > 0: available_metrics.append('Cadence')
@@ -807,7 +822,7 @@ if 'results' in st.session_state:
             fig_explorer.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
             st.plotly_chart(fig_explorer, use_container_width=True)
             
-    with tab8:
+    with tabs[7]: # Raw Data Explorer
         st.header("Raw Data Explorer")
         
         cols_to_show = [col for col in ['power', 'cadence', 'heart_rate', 'altitude', 'speed_kmh', 'temperature'] if col in df.columns and df[col].notna().any()]
@@ -821,6 +836,63 @@ if 'results' in st.session_state:
                     st.metric("Average", f"{df[col_name].mean():.1f}")
                     st.metric("Max", f"{df[col_name].max():.1f}")
                     st.metric("Min", f"{df[col_name].min():.1f}")
+
+    with tabs[8]: # Beta Features
+        st.header("🧪 Beta Features")
+        st.warning("These features are experimental and may not be fully accurate. Use with caution.")
+        
+        st.subheader("Pacing Analysis (by Duration)")
+        midpoint_time = df['time'].max() / 2
+        first_half = df[df['time'] <= midpoint_time]
+        second_half = df[df['time'] > midpoint_time]
+
+        pacing_cols = st.columns(2)
+        with pacing_cols[0]:
+            st.markdown("#### First Half")
+            st.metric("Avg Power", f"{round(first_half['power'].mean())} W")
+            st.metric("Avg Speed", f"{first_half['speed_kmh'].mean():.1f} km/h")
+            st.metric("Avg Cadence", f"{round(first_half[first_half['cadence'] > 0]['cadence'].mean())} rpm")
+        with pacing_cols[1]:
+            st.markdown("#### Second Half")
+            st.metric("Avg Power", f"{round(second_half['power'].mean())} W")
+            st.metric("Avg Speed", f"{second_half['speed_kmh'].mean():.1f} km/h")
+            st.metric("Avg Cadence", f"{round(second_half[second_half['cadence'] > 0]['cadence'].mean())} rpm")
+
+        st.divider()
+
+        st.subheader("Ride Comparison")
+        if 'df2' in results:
+            df2 = results['df2']
+            
+            start_idx1 = (df['distance'] > 0).idxmax()
+            start_idx2 = (df2['distance'] > 0).idxmax()
+            
+            df1_aligned = df.iloc[start_idx1:].copy()
+            df2_aligned = df2.iloc[start_idx2:].copy()
+            
+            df1_aligned['time'] = df1_aligned['time'] - df1_aligned['time'].iloc[0]
+            df2_aligned['time'] = df2_aligned['time'] - df2_aligned['time'].iloc[0]
+
+            comp_cols = st.columns(2)
+            with comp_cols[0]:
+                st.markdown("#### Ride 1 (Primary)")
+                st.metric("Avg Power", f"{round(df1_aligned['power'].mean())} W")
+                st.metric("Avg Speed", f"{df1_aligned['speed_kmh'].mean():.1f} km/h")
+                st.metric("Total Distance", f"{df1_aligned['distance'].max() / 1000:.2f} km")
+            with comp_cols[1]:
+                st.markdown("#### Ride 2 (Comparison)")
+                st.metric("Avg Power", f"{round(df2_aligned['power'].mean())} W")
+                st.metric("Avg Speed", f"{df2_aligned['speed_kmh'].mean():.1f} km/h")
+                st.metric("Total Distance", f"{df2_aligned['distance'].max() / 1000:.2f} km")
+
+            fig_comp = go.Figure()
+            fig_comp.add_trace(go.Scatter(x=df1_aligned['time'], y=df1_aligned['power'], name='Ride 1 Power', line=dict(color='blue')))
+            fig_comp.add_trace(go.Scatter(x=df2_aligned['time'], y=df2_aligned['power'], name='Ride 2 Power', line=dict(color='red')))
+            fig_comp.update_layout(title_text='Power Comparison (Aligned by Start of Movement)', template='plotly_white')
+            st.plotly_chart(fig_comp, use_container_width=True)
+
+        else:
+            st.info("Upload a second .fit file in the sidebar to use the ride comparison feature.")
 
 
 elif not uploaded_file and analyze_button:
