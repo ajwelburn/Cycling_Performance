@@ -38,8 +38,13 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
                         if frame.has_field("time_created"):
                             start_time = frame.get_value("time_created")
                     
+                    # Second priority: session start time
+                    if start_time is None and frame.frame_type == fitdecode.FIT_FRAME_DATA and frame.name == "session":
+                        if frame.has_field("start_time"):
+                            start_time = frame.get_value("start_time")
+                    
                     if frame.frame_type == fitdecode.FIT_FRAME_DATA and frame.name == "record":
-                        # Fallback: if no file_id message, use the first record's timestamp
+                        # Fallback: if no other time found, use the first record's timestamp
                         if start_time is None and frame.has_field("timestamp"):
                             start_time = frame.get_value("timestamp")
 
@@ -72,7 +77,7 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     if 'position_long' in df.columns:
         df['position_long'] = df['position_long'] * (180 / 2**31) if df['position_long'].notnull().any() else np.nan
 
-    if start_time:
+    if start_time and isinstance(start_time, datetime):
         df['time'] = (df['timestamp'] - start_time).dt.total_seconds()
     else: # Fallback if no timestamp is found
         df['time'] = range(len(df))
@@ -247,6 +252,7 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
         w_prime_depleted = duration * (avg_power - cp)
         depletion_percent = (w_prime_depleted / w_prime) * 100 if w_prime > 0 else 0
         match_data.append({
+            "Start Time (s)": df['time'].iloc[match['start']],
             "Duration (s)": duration, 
             "Magnitude (%CP)": magnitude,
             "Depletion (% W')": depletion_percent
