@@ -210,7 +210,7 @@ def analyze_bouts(df: pd.DataFrame, bouts: List[Dict], bout_type: str, cp: int) 
         
         wbal_change = bout_df['Wbal'].iloc[-1] - bout_df['Wbal'].iloc[0]
         
-        pedaling_cadence = bout_df['cadence'][bout_df['cadence'] > 0]
+        pedaling_cadence = df['cadence'][df['cadence'] > 0]
         avg_cadence = round(pedaling_cadence.mean()) if not pedaling_cadence.empty else 0
 
         bout_summary = {
@@ -442,6 +442,24 @@ if 'results' in st.session_state:
 
     with tab1:
         st.header("Ride Summary")
+        
+        # --- [EDIT] Moved "About" section to the top ---
+        st.subheader("About the Model")
+        col1, col2 = st.columns([1, 10])
+        with col1:
+            st.markdown("👨‍🔬")
+        with col2:
+            st.markdown(
+                """
+                This tool utilizes a W' balance model based on the research by Alex Welburn, PhD. 
+                For more information, please see the following links:
+                - **Publication:** [A novel method to calculate the parameters...](https://link.springer.com/article/10.1007/s00421-025-05912-0)
+                - **ResearchGate:** [Alex Welburn](https://www.researchgate.net/profile/Alex-Welburn)
+                - **X (Twitter):** [@AlexWelburn](https://twitter.com/xx)
+                """
+            )
+        st.divider()
+
         col1, col2 = st.columns(2)
         with col1:
             st.subheader("Ride Details")
@@ -492,24 +510,6 @@ if 'results' in st.session_state:
             st.metric("Avg Power", f"{metrics.get('avg_power_below', 'N/A')} W")
             st.metric("Number of Bouts", f"{metrics.get('bouts_below', 'N/A')}")
         
-        st.divider()
-        
-        st.text_area("User Notes:", height=150)
-        
-        st.subheader("About the Model")
-        col1, col2 = st.columns([1, 5])
-        with col1:
-            st.markdown("👨‍🔬")
-        with col2:
-            st.markdown(
-                """
-                This tool utilizes a W' balance model based on the research by Alex Welburn, PhD. 
-                For a detailed understanding of the methodology and its validation, please refer to the publication:
-                
-                **[Welburn, A., et al. A novel method to calculate the parameters of the power-duration relationship from a single ramp-test. *Eur J Appl Physiol* (2025).](https://link.springer.com/article/10.1007/s00421-025-05912-0)**
-                """
-            )
-
     with tab2:
         st.header("Interval Analysis")
         fig_intervals = make_subplots(specs=[[{"secondary_y": True}]])
