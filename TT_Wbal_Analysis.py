@@ -312,7 +312,6 @@ with st.sidebar:
     CP = st.number_input('Critical Power (CP) in Watts', value=350, step=1)
     WP_kJ = st.number_input('W\' (W prime) in kJ', value=20.0, step=1.0, format="%.1f")
     
-    # --- [EDIT] Updated labels, defaults, and format for Tau constants ---
     A = st.number_input('Parameter A', value=5187, step=1)
     B = st.number_input('Parameter B', value=-0.70, format="%.2f")
 
@@ -495,13 +494,12 @@ if 'results' in st.session_state:
         
         st.divider()
         
-        # --- [NEW] User Notes and Research Link Section ---
         st.text_area("User Notes:", height=150)
         
         st.subheader("About the Model")
         col1, col2 = st.columns([1, 5])
         with col1:
-            st.markdown("👨‍🔬") # Simple graphic
+            st.markdown("👨‍🔬")
         with col2:
             st.markdown(
                 """
@@ -750,3 +748,4 @@ elif not uploaded_file and analyze_button:
 
 else:
     if 'results' not in st.session_state:
+        st.info("Upload a file and click 'Analyze Ride' to begin.")
