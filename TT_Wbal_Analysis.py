@@ -14,7 +14,7 @@ from datetime import datetime, time, date
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="W'bal Analysis Tool by Alex Welburn",
+    page_title="W'bal Analysis Tool",
     page_icon="🚴",
     layout="wide"
 )
