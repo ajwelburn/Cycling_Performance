@@ -453,9 +453,9 @@ if 'results' in st.session_state:
                 """
                 This tool utilizes a W' balance model based on the research by Alex Welburn, PhD. 
                 For more information, please see the following links:
-                - **Publication:** [A novel method to calculate the parameters...](https://link.springer.com/article/10.1007/s00421-025-05912-0)
+                - **Publication:** [Latest research](https://link.springer.com/article/10.1007/s00421-025-05912-0)
                 - **ResearchGate:** [Alex Welburn](https://www.researchgate.net/profile/Alex-Welburn)
-                - **X (Twitter):** [@AlexWelburn](https://twitter.com/xx)
+                - **X (Twitter):** [@AlexWelburn](https://x.com/Alex_Welburn)
                 """
             )
         st.divider()
