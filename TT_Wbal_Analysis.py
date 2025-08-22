@@ -83,11 +83,10 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     if 'position_long' in df.columns and df['position_long'].notnull().any():
         df['position_long'] = df['position_long'] * SEMICIRCLES_TO_DEGREES
 
-    # We will handle time calculation in the main logic based on whether a manual time is provided
-    if not start_time:
+    if not start_time and not df.empty:
         st.warning("Could not find a reliable start time in the file. Using elapsed time from the first record unless a manual time is set.")
         df['time'] = (df['timestamp'] - df['timestamp'].iloc[0]).dt.total_seconds()
-    else:
+    elif start_time:
         df['time'] = (df['timestamp'] - start_time).dt.total_seconds()
         
     df.drop(columns=['timestamp'], inplace=True, errors='ignore')
@@ -157,7 +156,8 @@ def calculate_power_zones(power_data: pd.Series, cp: int) -> pd.DataFrame:
 @st.cache_data
 def calculate_mmp_curve(power_data: pd.Series, weight: float) -> pd.DataFrame:
     """Calculates the Mean Maximal Power (MMP) curve in W and W/kg."""
-    durations = [1, 5, 10, 30, 60, 120, 300, 600, 1200, 1800, 3600]
+    # --- [EDIT] Added more specific durations ---
+    durations = sorted(list(set([1, 5, 10, 20, 30, 60, 120, 180, 300, 480, 600, 720, 1200, 1800, 3600])))
     mmp_w = {d: power_data.rolling(window=d).mean().max() for d in durations if len(power_data) >= d}
     
     mmp_df = pd.DataFrame(list(mmp_w.items()), columns=["Duration (s)", "Max Power (W)"])
@@ -210,7 +210,7 @@ def analyze_bouts(df: pd.DataFrame, bouts: List[Dict], bout_type: str, cp: int) 
         
         wbal_change = bout_df['Wbal'].iloc[-1] - bout_df['Wbal'].iloc[0]
         
-        pedaling_cadence = df['cadence'][df['cadence'] > 0]
+        pedaling_cadence = bout_df['cadence'][bout_df['cadence'] > 0]
         avg_cadence = round(pedaling_cadence.mean()) if not pedaling_cadence.empty else 0
 
         bout_summary = {
@@ -291,10 +291,10 @@ def get_time_of_day(hour: int) -> str:
 def format_seconds_to_hms(seconds: float) -> str:
     """Converts seconds into a 'Xh Ym Zs' format."""
     seconds = round(seconds)
-    hours = seconds // 3600
-    minutes = (seconds % 3600) // 60
-    remaining_seconds = seconds % 60
-    return f"{hours}h {minutes}m {remaining_seconds}s"
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    remaining_seconds = int(seconds % 60)
+    return f"{hours}h {minutes:02d}m {remaining_seconds:02d}s"
 
 # --- Main App Interface ---
 st.title("🚴 W' Balance and Time Trial Analysis Tool")
@@ -382,6 +382,10 @@ if analyze_button:
                 grouped_state = df.groupby('state')
                 metrics["total_time_above"] = len(df[df['state'] == 'above'])
                 metrics["total_time_below"] = len(df[df['state'] == 'below'])
+                metrics["avg_power_overall"] = round(df['power'].mean())
+                if weight > 0:
+                    metrics["avg_power_w_kg"] = round(metrics["avg_power_overall"] / weight, 2)
+                
                 metrics["avg_power_above"] = round(df.loc[df['state'] == 'above', 'power'].mean()) if metrics["total_time_above"] > 0 else 0
                 metrics["avg_power_below"] = round(df.loc[df['state'] == 'below', 'power'].mean()) if metrics["total_time_below"] > 0 else 0
 
@@ -402,7 +406,6 @@ if analyze_button:
                 metrics["coasting_time"] = (df['cadence'] == 0).sum()
                 metrics["coasting_percent"] = round((metrics["coasting_time"] / len(df)) * 100) if len(df) > 0 else 0
                 
-                metrics["avg_power_overall"] = round(df['power'].mean())
                 metrics["avg_speed_overall"] = round(df['speed_kmh'].mean(), 1) if 'speed_kmh' in df.columns else 0
                 metrics["total_distance"] = round(df['distance'].max() / 1000, 2) if 'distance' in df.columns else 0
                 
@@ -443,19 +446,16 @@ if 'results' in st.session_state:
     with tab1:
         st.header("Ride Summary")
         
-        # --- [EDIT] Moved "About" section to the top ---
         st.subheader("About the Model")
         col1, col2 = st.columns([1, 10])
         with col1:
             st.markdown("👨‍🔬")
         with col2:
+            # --- [EDIT] Compacted "About" section ---
             st.markdown(
                 """
                 This tool utilizes a W' balance model based on the research by Alex Welburn, PhD. 
-                For more information, please see the following links:
-                - **Publication:** [Latest research](https://link.springer.com/article/10.1007/s00421-025-05912-0)
-                - **ResearchGate:** [Alex Welburn](https://www.researchgate.net/profile/Alex-Welburn)
-                - **X (Twitter):** [@AlexWelburn](https://x.com/Alex_Welburn)
+                [Publication](https://link.springer.com/article/10.1007/s00421-025-05912-0) | [ResearchGate](https://www.researchgate.net/profile/Alex-Welburn) | [X (Twitter)](https://twitter.com/xx)
                 """
             )
         st.divider()
@@ -472,18 +472,24 @@ if 'results' in st.session_state:
             st.subheader("Weather Conditions")
             if ride_info["weather"]:
                 weather = ride_info["weather"]
-                temp = weather['temperature']
-                thermo_emoji = "🔥" if temp > 25 else "☀️" if temp > 18 else "⛅"
-                st.metric(f"Temperature {thermo_emoji}", f"{temp}°C")
-                st.metric("Wind", f"{weather['wind_speed']} km/h ({weather['wind_direction']}°)")
+                temp = weather.get('temperature') # Use .get() to avoid KeyError
+                # --- [FIX] Check if temp is a number before comparison ---
+                if isinstance(temp, (int, float)):
+                    thermo_emoji = "🔥" if temp > 25 else "☀️" if temp > 18 else "⛅"
+                    st.metric(f"Temperature {thermo_emoji}", f"{temp}°C")
+                else:
+                    st.metric("Temperature", "N/A")
+                st.metric("Wind", f"{weather.get('wind_speed')} km/h ({weather.get('wind_direction')}°)")
             else:
                 st.info("No location data found to fetch weather.")
 
         st.divider()
         st.subheader("Overall Ride Metrics")
         c1, c2, c3 = st.columns(3)
+        avg_power_w_kg_val = metrics.get('avg_power_w_kg', 'N/A')
         c1.metric("Total Distance", f"{metrics.get('total_distance', 'N/A')} km")
-        c2.metric("Average Power", f"{metrics.get('avg_power_overall', 'N/A')} W")
+        # --- [EDIT] Added W/kg to Avg Power metric ---
+        c2.metric("Average Power", f"{metrics.get('avg_power_overall', 'N/A')} W", f"{avg_power_w_kg_val} W/kg" if isinstance(avg_power_w_kg_val, (int, float)) else None)
         c3.metric("Average Speed", f"{metrics.get('avg_speed_overall', 'N/A')} km/h")
 
         c4, c5, c6 = st.columns(3)
@@ -492,8 +498,9 @@ if 'results' in st.session_state:
         total_work_per_kg_val = metrics.get('total_work_kj_per_kg', 'N/A')
         work_above_cp_per_kg_val = metrics.get('total_work_above_cp_kj_per_kg', 'N/A')
         
-        c4.metric("Total Work", f"{total_work_val} kJ", f"{total_work_per_kg_val} kJ/kg" if isinstance(total_work_per_kg_val, (int, float)) else "")
-        c5.metric("Work Above CP", f"{work_above_cp_val} kJ", f"{work_above_cp_per_kg_val} kJ/kg" if isinstance(work_above_cp_per_kg_val, (int, float)) else "")
+        # --- [EDIT] Removed delta from work metrics ---
+        c4.metric("Total Work", f"{total_work_val} kJ", help=f"{total_work_per_kg_val} kJ/kg" if isinstance(total_work_per_kg_val, (int, float)) else None)
+        c5.metric("Work Above CP", f"{work_above_cp_val} kJ", help=f"{work_above_cp_per_kg_val} kJ/kg" if isinstance(work_above_cp_per_kg_val, (int, float)) else None)
         c6.metric("Coasting", f"{metrics.get('coasting_percent', 'N/A')}%")
         
         st.divider()
@@ -615,7 +622,11 @@ if 'results' in st.session_state:
     with tab5:
         st.header("Power Profile")
         zones_df = power_profile["zones"]
-        fig_zones = go.Figure(go.Bar(x=zones_df['Time (s)'], y=zones_df['Zone'], orientation='h', text=zones_df['Percentage'].apply(lambda x: f'{x:.1f}%')))
+        # --- [EDIT] Added formatted time to zones chart ---
+        zones_df['Time (HMS)'] = zones_df['Time (s)'].apply(format_seconds_to_hms)
+        zones_df['Chart Text'] = zones_df.apply(lambda row: f"{row['Time (HMS)']} ({row['Percentage']:.1f}%)", axis=1)
+        
+        fig_zones = go.Figure(go.Bar(x=zones_df['Time (s)'], y=zones_df['Zone'], orientation='h', text=zones_df['Chart Text']))
         fig_zones.update_layout(title_text='Time in Power Zones', template='plotly_white', font=dict(color="black"))
         fig_zones.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
         fig_zones.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
@@ -624,17 +635,30 @@ if 'results' in st.session_state:
         mmp_df = power_profile["mmp"]
         st.subheader("Mean Maximal Power (Watts)")
         
-        key_durations = {"5s": 5, "1 min": 60, "5 min": 300, "20 min": 1200}
+        # --- [EDIT] Expanded key durations for MMP ---
+        key_durations = {"5s": 5, "20s": 20, "1 min": 60, "3 min": 180, "5 min": 300, "8 min": 480, "12 min": 720, "20 min": 1200}
         mmp_data_w = mmp_df.set_index("Duration (s)")["Max Power (W)"]
         
-        cols = st.columns(len(key_durations))
-        for i, (label, duration) in enumerate(key_durations.items()):
-            power_value = mmp_data_w.get(duration)
-            with cols[i]:
-                if power_value is not None:
-                    st.metric(label=label, value=f"{int(power_value)} W")
+        cols = st.columns(4)
+        duration_keys = list(key_durations.keys())
+        for i in range(0, len(duration_keys), 2):
+            with cols[i//2]:
+                label1 = duration_keys[i]
+                duration1 = key_durations[label1]
+                power_value1 = mmp_data_w.get(duration1)
+                if power_value1 is not None:
+                    st.metric(label=label1, value=f"{int(power_value1)} W")
                 else:
-                    st.metric(label=label, value="N/A")
+                    st.metric(label=label1, value="N/A")
+                
+                if i + 1 < len(duration_keys):
+                    label2 = duration_keys[i+1]
+                    duration2 = key_durations[label2]
+                    power_value2 = mmp_data_w.get(duration2)
+                    if power_value2 is not None:
+                        st.metric(label=label2, value=f"{int(power_value2)} W")
+                    else:
+                        st.metric(label=label2, value="N/A")
 
         fig_mmp = go.Figure(go.Scatter(x=mmp_df['Duration (s)'], y=mmp_df['Max Power (W)'], mode='lines+markers'))
         fig_mmp.update_layout(title_text='Mean Maximal Power (MMP) Curve', template='plotly_white', font=dict(color="black"),
@@ -652,14 +676,25 @@ if 'results' in st.session_state:
             st.subheader("Mean Maximal Power (W/kg)")
             mmp_data_wkg = mmp_df.set_index("Duration (s)")["Max Power (W/kg)"]
             
-            cols_wkg = st.columns(len(key_durations))
-            for i, (label, duration) in enumerate(key_durations.items()):
-                power_value_wkg = mmp_data_wkg.get(duration)
-                with cols_wkg[i]:
-                    if power_value_wkg is not None:
-                        st.metric(label=label, value=f"{power_value_wkg:.2f} W/kg")
+            cols_wkg = st.columns(4)
+            for i in range(0, len(duration_keys), 2):
+                with cols_wkg[i//2]:
+                    label1 = duration_keys[i]
+                    duration1 = key_durations[label1]
+                    power_value_wkg1 = mmp_data_wkg.get(duration1)
+                    if power_value_wkg1 is not None:
+                        st.metric(label=label1, value=f"{power_value_wkg1:.2f} W/kg")
                     else:
-                        st.metric(label=label, value="N/A")
+                        st.metric(label=label1, value="N/A")
+
+                    if i + 1 < len(duration_keys):
+                        label2 = duration_keys[i+1]
+                        duration2 = key_durations[label2]
+                        power_value_wkg2 = mmp_data_wkg.get(duration2)
+                        if power_value_wkg2 is not None:
+                            st.metric(label=label2, value=f"{power_value_wkg2:.2f} W/kg")
+                        else:
+                            st.metric(label=label2, value="N/A")
 
             fig_mmp_wkg = go.Figure(go.Scatter(x=mmp_df['Duration (s)'], y=mmp_df['Max Power (W/kg)'], mode='lines+markers', line=dict(color='orange')))
             fig_mmp_wkg.update_layout(title_text='Mean Maximal Power (MMP) Curve (W/kg)', template='plotly_white', font=dict(color="black"),
