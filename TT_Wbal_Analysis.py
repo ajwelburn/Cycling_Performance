@@ -338,14 +338,14 @@ def format_seconds_to_hms(seconds: float) -> str:
     return f"{hours}h {minutes:02d}m {remaining_seconds:02d}s"
 
 # --- Main App Interface ---
-st.title("🚴 W' Balance and Time Trial Analysis Tool")
+st.title("🚴 W' Bal: TT and Race  Analysis Tool")
 st.markdown("Upload a `.fit` file and set your parameters to generate a detailed performance analysis.")
 
 # --- Sidebar for Inputs ---
 with st.sidebar:
     st.header("1. Upload Activity File")
     uploaded_file = st.file_uploader("Choose a .fit file", type="fit")
-    st.caption("Note: Your data is processed in memory and is deleted when you close the browser tab. No data is stored.")
+    st.caption("Note: Created by Alex Welburn Your data is processed in memory and is deleted when you close the browser tab. No data is stored.")
     
     st.header("2. Input Parameters")
     weight = st.number_input('Weight (kg)', value=75.0, min_value=30.0, max_value=200.0, step=0.5, format="%.1f")
