@@ -10,14 +10,14 @@ from streamlit_folium import st_folium
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from typing import Tuple, List, Dict
-from datetime import datetime
+from datetime import datetime, time, date
 import requests
 from folium.features import ColorLine
 import plotly.colors
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="W'bal Analysis Tool by Alex Welburn",
+    page_title="W'bal Analysis Tool",
     page_icon="🚴",
     layout="wide"
 )
@@ -34,7 +34,6 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     Returns the DataFrame, missing power count, and the ride start time.
     """
     records = []
-    # --- [EDIT] More robust start time detection ---
     file_id_time, session_time, first_record_time = None, None, None
     
     try:
@@ -71,7 +70,6 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
         st.error(f"Error decoding .fit file: {e}")
         return pd.DataFrame(), 0, None
 
-    # Prioritize the most reliable start time
     start_time = file_id_time or session_time or first_record_time
 
     if not records:
@@ -85,11 +83,12 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     if 'position_long' in df.columns and df['position_long'].notnull().any():
         df['position_long'] = df['position_long'] * SEMICIRCLES_TO_DEGREES
 
-    if start_time and isinstance(start_time, datetime):
-        df['time'] = (df['timestamp'] - start_time).dt.total_seconds()
-    else:
-        st.warning("Could not find a reliable start time in the file. Using elapsed time from the first record.")
+    # We will handle time calculation in the main logic based on whether a manual time is provided
+    if not start_time:
+        st.warning("Could not find a reliable start time in the file. Using elapsed time from the first record unless a manual time is set.")
         df['time'] = (df['timestamp'] - df['timestamp'].iloc[0]).dt.total_seconds()
+    else:
+        df['time'] = (df['timestamp'] - start_time).dt.total_seconds()
         
     df.drop(columns=['timestamp'], inplace=True, errors='ignore')
 
@@ -140,9 +139,9 @@ def get_weather_data(lat: float, lon: float, start_time: datetime) -> Dict:
 def calculate_power_zones(power_data: pd.Series, cp: int) -> pd.DataFrame:
     """Calculates time spent in 7 power zones based on CP."""
     zones = {
-        "Z1 Active Recovery": (0, 0.55), "Z2 Endurance": (0.55, 0.75), "Z3 Tempo": (0.75, 0.90),
-        "Z4 Threshold": (0.90, 1.05), "Z5 VO2 Max": (1.05, 1.20), "Z6 Anaerobic": (1.20, 1.50),
-        "Z7 Neuromuscular": (1.50, np.inf),
+        "Zone 1": (0, 0.55), "Zone 2": (0.55, 0.75), "Zone 3": (0.75, 0.90),
+        "Zone 4": (0.90, 1.05), "Zone 5": (1.05, 1.20), "Zone 6": (1.20, 1.50),
+        "Zone 7": (1.50, np.inf),
     }
     zone_counts = {name: 0 for name in zones}
     for power in power_data:
@@ -156,11 +155,17 @@ def calculate_power_zones(power_data: pd.Series, cp: int) -> pd.DataFrame:
     return pd.DataFrame(zone_data)
 
 @st.cache_data
-def calculate_mmp_curve(power_data: pd.Series) -> pd.DataFrame:
-    """Calculates the Mean Maximal Power (MMP) curve."""
+def calculate_mmp_curve(power_data: pd.Series, weight: float) -> pd.DataFrame:
+    """Calculates the Mean Maximal Power (MMP) curve in W and W/kg."""
     durations = [1, 5, 10, 30, 60, 120, 300, 600, 1200, 1800, 3600]
-    mmp = {d: power_data.rolling(window=d).mean().max() for d in durations if len(power_data) >= d}
-    return pd.DataFrame(list(mmp.items()), columns=["Duration (s)", "Max Power (W)"])
+    mmp_w = {d: power_data.rolling(window=d).mean().max() for d in durations if len(power_data) >= d}
+    
+    mmp_df = pd.DataFrame(list(mmp_w.items()), columns=["Duration (s)", "Max Power (W)"])
+    if weight > 0:
+        mmp_df["Max Power (W/kg)"] = mmp_df["Max Power (W)"] / weight
+    else:
+        mmp_df["Max Power (W/kg)"] = 0
+    return mmp_df
 
 @st.cache_data
 def find_top_bouts(df: pd.DataFrame, cp: int, buffer_duration: int = 5) -> Tuple[List[Dict], List[Dict]]:
@@ -292,7 +297,7 @@ def format_seconds_to_hms(seconds: float) -> str:
     return f"{hours}h {minutes}m {remaining_seconds}s"
 
 # --- Main App Interface ---
-st.title("🚴 W' Balance, Time Trial and Race Analysis Tool by Alex Welburn")
+st.title("🚴 W' Balance and Time Trial Analysis Tool")
 st.markdown("Upload a `.fit` file and set your parameters to generate a detailed performance analysis.")
 
 # --- Sidebar for Inputs ---
@@ -302,15 +307,21 @@ with st.sidebar:
     st.caption("Note: Your data is processed in memory and is deleted when you close the browser tab. No data is stored.")
     
     st.header("2. Input Parameters")
-    if 'A' not in st.session_state: st.session_state.A = 6000.0
-    if 'B' not in st.session_state: st.session_state.B = -0.68
-    if 'CP' not in st.session_state: st.session_state.CP = 350
-    if 'WP_kJ' not in st.session_state: st.session_state.WP_kJ = 20.0
+    weight = st.number_input('Weight (kg)', value=75.0, min_value=30.0, max_value=200.0, step=0.5, format="%.1f")
 
-    A = st.number_input('AW Simple Tau Constant (A)', value=st.session_state.A, format="%.2f")
-    B = st.number_input('AW Simple Tau Constant (B)', value=st.session_state.B, format="%.2f")
-    CP = st.number_input('Critical Power (CP) in Watts', value=st.session_state.CP, step=1)
-    WP_kJ = st.number_input('W\' (W prime) in kJ', value=st.session_state.WP_kJ, step=1.0, format="%.1f")
+    CP = st.number_input('Critical Power (CP) in Watts', value=350, step=1)
+    WP_kJ = st.number_input('W\' (W prime) in kJ', value=20.0, step=1.0, format="%.1f")
+    
+    # --- [EDIT] Updated labels, defaults, and format for Tau constants ---
+    A = st.number_input('Parameter A', value=5187, step=1)
+    B = st.number_input('Parameter B', value=-0.70, format="%.2f")
+
+    st.header("3. Manual Start Time (Optional)")
+    manual_time_override = st.checkbox("Manually set start time")
+    manual_date, manual_time = None, None
+    if manual_time_override:
+        manual_date = st.date_input("Select ride date", value=datetime.now())
+        manual_time = st.time_input("Select ride start time", value=datetime.now().time())
 
     analyze_button = st.button("Analyze Ride", type="primary")
 
@@ -328,7 +339,12 @@ if analyze_button:
     if uploaded_file:
         WP = WP_kJ * 1000
         file_content = uploaded_file.getvalue()
-        df, start_time, missing_power_count = parse_fit_file(file_content)
+        df, parsed_start_time, missing_power_count = parse_fit_file(file_content)
+
+        start_time = parsed_start_time
+        if manual_time_override:
+            start_time = datetime.combine(manual_date, manual_time)
+            st.info(f"Using manual start time: {start_time.strftime('%d %b %Y, %H:%M')}")
 
         if df.empty:
             st.error("Could not parse the .fit file. It might be empty or corrupted.")
@@ -359,6 +375,10 @@ if analyze_button:
                 metrics["total_work_kj"] = round(df['power'].sum() / 1000)
                 work_above_cp = df['power'][df['power'] > CP] - CP
                 metrics["total_work_above_cp_kj"] = round(work_above_cp.sum() / 1000)
+                
+                if weight > 0:
+                    metrics["total_work_kj_per_kg"] = round(metrics["total_work_kj"] / weight, 1)
+                    metrics["total_work_above_cp_kj_per_kg"] = round(metrics["total_work_above_cp_kj"] / weight, 1)
 
                 grouped_state = df.groupby('state')
                 metrics["total_time_above"] = len(df[df['state'] == 'above'])
@@ -388,7 +408,7 @@ if analyze_button:
                 metrics["total_distance"] = round(df['distance'].max() / 1000, 2) if 'distance' in df.columns else 0
                 
                 power_zones_df = calculate_power_zones(df['power'], CP)
-                mmp_df = calculate_mmp_curve(df['power'])
+                mmp_df = calculate_mmp_curve(df['power'], weight)
                 top_above_bouts, top_below_bouts = find_top_bouts(df, CP)
                 above_bouts_summary = analyze_bouts(df, top_above_bouts, "Effort", CP)
                 below_bouts_summary = analyze_bouts(df, top_below_bouts, "Recovery", CP)
@@ -401,7 +421,7 @@ if analyze_button:
                     "metrics": metrics,
                     "power_profile": {"zones": power_zones_df, "mmp": mmp_df},
                     "interval_analysis": {"above_bouts": top_above_bouts, "below_bouts": top_below_bouts, "above_summary": above_bouts_summary, "below_summary": below_bouts_summary},
-                    "params": {"CP": CP, "WP": WP},
+                    "params": {"CP": CP, "WP": WP, "Weight": weight},
                     "ride_info": {"start_time": start_time, "weather": weather_data}
                 }
     else:
@@ -416,7 +436,7 @@ if 'results' in st.session_state:
     power_profile = results["power_profile"]
     ride_info = results["ride_info"]
     interval_analysis = results["interval_analysis"]
-    CP, WP = params["CP"], params["WP"]
+    CP, WP, weight = params["CP"], params["WP"], params["Weight"]
     df['wbal_kj'] = df['Wbal'] / 1000
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["📊 Summary", "🏃 Interval Analysis", "🔥 Match Analysis", "📈 Ride Profile", "⚡ Power Profile", "🗺️ Route Maps", "⚙️ Data Explorer", "📋 Raw Data Explorer"])
@@ -452,13 +472,15 @@ if 'results' in st.session_state:
         c4, c5, c6 = st.columns(3)
         total_work_val = metrics.get('total_work_kj', 'N/A')
         work_above_cp_val = metrics.get('total_work_above_cp_kj', 'N/A')
+        total_work_per_kg_val = metrics.get('total_work_kj_per_kg', 'N/A')
+        work_above_cp_per_kg_val = metrics.get('total_work_above_cp_kj_per_kg', 'N/A')
         
-        c4.metric("Total Work", f"{total_work_val} kJ" if isinstance(total_work_val, (int, float)) else "N/A")
-        c5.metric("Work Above CP", f"{work_above_cp_val} kJ" if isinstance(work_above_cp_val, (int, float)) else "N/A")
+        c4.metric("Total Work", f"{total_work_val} kJ", f"{total_work_per_kg_val} kJ/kg" if isinstance(total_work_per_kg_val, (int, float)) else "")
+        c5.metric("Work Above CP", f"{work_above_cp_val} kJ", f"{work_above_cp_per_kg_val} kJ/kg" if isinstance(work_above_cp_per_kg_val, (int, float)) else "")
         c6.metric("Coasting", f"{metrics.get('coasting_percent', 'N/A')}%")
         
         st.divider()
-        st.header(f"Power Analysis (CP = {int(CP)} W)")
+        st.header(f"Power Analysis (Threshold = {int(CP)} W)")
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("##### Above CP")
@@ -470,6 +492,25 @@ if 'results' in st.session_state:
             st.metric("Total Time", format_seconds_to_hms(metrics.get('total_time_below', 0)))
             st.metric("Avg Power", f"{metrics.get('avg_power_below', 'N/A')} W")
             st.metric("Number of Bouts", f"{metrics.get('bouts_below', 'N/A')}")
+        
+        st.divider()
+        
+        # --- [NEW] User Notes and Research Link Section ---
+        st.text_area("User Notes:", height=150)
+        
+        st.subheader("About the Model")
+        col1, col2 = st.columns([1, 5])
+        with col1:
+            st.markdown("👨‍🔬") # Simple graphic
+        with col2:
+            st.markdown(
+                """
+                This tool utilizes a W' balance model based on the research by Alex Welburn, PhD. 
+                For a detailed understanding of the methodology and its validation, please refer to the publication:
+                
+                **[Welburn, A., et al. A novel method to calculate the parameters of the power-duration relationship from a single ramp-test. *Eur J Appl Physiol* (2025).](https://link.springer.com/article/10.1007/s00421-025-05912-0)**
+                """
+            )
 
     with tab2:
         st.header("Interval Analysis")
@@ -491,9 +532,9 @@ if 'results' in st.session_state:
         fig_intervals.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
         st.plotly_chart(fig_intervals, use_container_width=True)
 
-        st.subheader("Top 3 Efforts (Above CP)")
+        st.subheader("Top 3 Efforts (>CP)")
         st.dataframe(interval_analysis['above_summary'])
-        st.subheader("Top 3 Recovery Bouts (Below CP)")
+        st.subheader("Top 3 Recovery Bouts (<=CP)")
         st.dataframe(interval_analysis['below_summary'])
 
     with tab3:
@@ -521,7 +562,6 @@ if 'results' in st.session_state:
             )
         ))
 
-        # --- [EDIT] Improved depletion curve visualization ---
         max_duration = max(71, matches_df['Duration (s)'].max() + 10) if not matches_df.empty else 71
         depletion_levels = range(10, 60, 10)
         colors = plotly.colors.sequential.YlOrRd[::2] 
@@ -536,9 +576,8 @@ if 'results' in st.session_state:
                 mode='lines', 
                 line=dict(dash='dot', color=colors[i]), 
                 name=f'{depletion}% W\'',
-                showlegend=False # Hide from legend
+                showlegend=False
             ))
-            # Add annotation at the end of the line
             fig_matches.add_annotation(
                 x=durations[-1], y=magnitude[-1],
                 text=f" {depletion}%", showarrow=False,
@@ -585,14 +624,14 @@ if 'results' in st.session_state:
         st.plotly_chart(fig_zones, use_container_width=True)
         
         mmp_df = power_profile["mmp"]
-        st.subheader("Mean Maximal Power")
+        st.subheader("Mean Maximal Power (Watts)")
         
         key_durations = {"5s": 5, "1 min": 60, "5 min": 300, "20 min": 1200}
-        mmp_data = mmp_df.set_index("Duration (s)")["Max Power (W)"]
+        mmp_data_w = mmp_df.set_index("Duration (s)")["Max Power (W)"]
         
         cols = st.columns(len(key_durations))
         for i, (label, duration) in enumerate(key_durations.items()):
-            power_value = mmp_data.get(duration)
+            power_value = mmp_data_w.get(duration)
             with cols[i]:
                 if power_value is not None:
                     st.metric(label=label, value=f"{int(power_value)} W")
@@ -611,6 +650,32 @@ if 'results' in st.session_state:
         fig_mmp.update_yaxes(title_text='Max Power (W)', showline=True, linewidth=2, linecolor='black', mirror=False)
         st.plotly_chart(fig_mmp, use_container_width=True)
 
+        if weight > 0:
+            st.subheader("Mean Maximal Power (W/kg)")
+            mmp_data_wkg = mmp_df.set_index("Duration (s)")["Max Power (W/kg)"]
+            
+            cols_wkg = st.columns(len(key_durations))
+            for i, (label, duration) in enumerate(key_durations.items()):
+                power_value_wkg = mmp_data_wkg.get(duration)
+                with cols_wkg[i]:
+                    if power_value_wkg is not None:
+                        st.metric(label=label, value=f"{power_value_wkg:.2f} W/kg")
+                    else:
+                        st.metric(label=label, value="N/A")
+
+            fig_mmp_wkg = go.Figure(go.Scatter(x=mmp_df['Duration (s)'], y=mmp_df['Max Power (W/kg)'], mode='lines+markers', line=dict(color='orange')))
+            fig_mmp_wkg.update_layout(title_text='Mean Maximal Power (MMP) Curve (W/kg)', template='plotly_white', font=dict(color="black"),
+                                    xaxis_type="log",
+                                    xaxis = dict(
+                                        tickmode = 'array',
+                                        tickvals = [1, 5, 10, 30, 60, 120, 300, 600, 1200, 1800, 3600],
+                                        ticktext = ['1s', '5s', '10s', '30s', '1m', '2m', '5m', '10m', '20m', '30m', '60m']
+                                    ))
+            fig_mmp_wkg.update_xaxes(title_text='Duration (log scale)', showline=True, linewidth=2, linecolor='black', mirror=False)
+            fig_mmp_wkg.update_yaxes(title_text='Max Power (W/kg)', showline=True, linewidth=2, linecolor='black', mirror=False)
+            st.plotly_chart(fig_mmp_wkg, use_container_width=True)
+
+
     with tab6:
         st.header("Route Maps")
         if 'position_lat' in df.columns and 'position_long' in df.columns and not df[['position_lat', 'position_long']].dropna().empty:
@@ -624,7 +689,6 @@ if 'results' in st.session_state:
             
             m_wbal = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB positron')
             
-            # --- [EDIT] More performant map rendering ---
             coordinates = list(zip(gps_df['position_lat'], gps_df['position_long']))
             ColorLine(
                 positions=coordinates,
@@ -686,4 +750,3 @@ elif not uploaded_file and analyze_button:
 
 else:
     if 'results' not in st.session_state:
-        st.info("Upload a file and click 'Analyze Ride' to begin.")
