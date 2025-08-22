@@ -12,6 +12,8 @@ from plotly.subplots import make_subplots
 from typing import Tuple, List, Dict
 from datetime import datetime
 import requests
+from folium.features import ColorLine
+import plotly.colors
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -32,43 +34,45 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     Returns the DataFrame, missing power count, and the ride start time.
     """
     records = []
-    start_time = None
+    # --- [EDIT] More robust start time detection ---
+    file_id_time, session_time, first_record_time = None, None, None
+    
     try:
         with io.BytesIO(file_content) as fit_file:
             with fitdecode.FitReader(fit_file) as fit:
                 for frame in fit:
-                    # Prioritize the file_id message for the most accurate start time
-                    if frame.frame_type == fitdecode.FIT_FRAME_DATA and frame.name == "file_id":
-                        if frame.has_field("time_created"):
-                            start_time = frame.get_value("time_created")
-                    
-                    # Second priority: session start time
-                    if start_time is None and frame.frame_type == fitdecode.FIT_FRAME_DATA and frame.name == "session":
-                        if frame.has_field("start_time"):
-                            start_time = frame.get_value("start_time")
-                    
-                    if frame.frame_type == fitdecode.FIT_FRAME_DATA and frame.name == "record":
-                        # Fallback: if no other time found, use the first record's timestamp
-                        if start_time is None and frame.has_field("timestamp"):
-                            start_time = frame.get_value("timestamp")
+                    if frame.frame_type == fitdecode.FIT_FRAME_DATA:
+                        if frame.name == "file_id" and frame.has_field("time_created"):
+                            file_id_time = frame.get_value("time_created")
+                        
+                        elif frame.name == "session" and frame.has_field("start_time"):
+                            session_time = frame.get_value("start_time")
 
-                        record_data = {
-                            "timestamp": frame.get_value("timestamp", fallback=None),
-                            "power": frame.get_value("power", fallback=None),
-                            "cadence": frame.get_value("cadence", fallback=None),
-                            "altitude": frame.get_value("altitude", fallback=None),
-                            "heart_rate": frame.get_value("heart_rate", fallback=None),
-                            "speed": frame.get_value("speed", fallback=None),
-                            "distance": frame.get_value("distance", fallback=None),
-                            "temperature": frame.get_value("temperature", fallback=None),
-                            "position_lat": frame.get_value("position_lat", fallback=None),
-                            "position_long": frame.get_value("position_long", fallback=None),
-                        }
-                        if record_data["timestamp"] is not None:
-                            records.append(record_data)
+                        elif frame.name == "record":
+                            if first_record_time is None and frame.has_field("timestamp"):
+                                first_record_time = frame.get_value("timestamp")
+
+                            record_data = {
+                                "timestamp": frame.get_value("timestamp", fallback=None),
+                                "power": frame.get_value("power", fallback=None),
+                                "cadence": frame.get_value("cadence", fallback=None),
+                                "altitude": frame.get_value("altitude", fallback=None),
+                                "heart_rate": frame.get_value("heart_rate", fallback=None),
+                                "speed": frame.get_value("speed", fallback=None),
+                                "distance": frame.get_value("distance", fallback=None),
+                                "temperature": frame.get_value("temperature", fallback=None),
+                                "position_lat": frame.get_value("position_lat", fallback=None),
+                                "position_long": frame.get_value("position_long", fallback=None),
+                            }
+                            if record_data["timestamp"] is not None:
+                                records.append(record_data)
+
     except fitdecode.FitDecodeError as e:
         st.error(f"Error decoding .fit file: {e}")
         return pd.DataFrame(), 0, None
+
+    # Prioritize the most reliable start time
+    start_time = file_id_time or session_time or first_record_time
 
     if not records:
         st.warning("The selected .fit file contains no data records.")
@@ -76,15 +80,16 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
 
     df = pd.DataFrame(records)
     
-    if 'position_lat' in df.columns:
+    if 'position_lat' in df.columns and df['position_lat'].notnull().any():
         df['position_lat'] = df['position_lat'] * SEMICIRCLES_TO_DEGREES
-    if 'position_long' in df.columns:
+    if 'position_long' in df.columns and df['position_long'].notnull().any():
         df['position_long'] = df['position_long'] * SEMICIRCLES_TO_DEGREES
 
     if start_time and isinstance(start_time, datetime):
         df['time'] = (df['timestamp'] - start_time).dt.total_seconds()
-    else: # Fallback if no timestamp is found
-        df['time'] = range(len(df))
+    else:
+        st.warning("Could not find a reliable start time in the file. Using elapsed time from the first record.")
+        df['time'] = (df['timestamp'] - df['timestamp'].iloc[0]).dt.total_seconds()
         
     df.drop(columns=['timestamp'], inplace=True, errors='ignore')
 
@@ -96,7 +101,6 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     for col in ['power', 'cadence', 'heart_rate', 'speed', 'distance', 'temperature']:
         if col not in df.columns: df[col] = np.nan
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-
 
     if 'altitude' in df.columns: df['altitude'] = df['altitude'].fillna(method='ffill')
     if 'speed' in df.columns: df['speed_kmh'] = df['speed'] * 3.6
@@ -117,7 +121,7 @@ def get_weather_data(lat: float, lon: float, start_time: datetime) -> Dict:
             "&hourly=temperature_2m,relativehumidity_2m,windspeed_10m,winddirection_10m"
         )
         response = requests.get(url, timeout=10)
-        response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+        response.raise_for_status()
         data = response.json()
         hour = start_time.hour
         return {
@@ -352,24 +356,20 @@ if analyze_button:
                 metrics = {}
                 df['state'] = np.where(df['power'] > CP, 'above', 'below')
                 
-                # Work calculations (Joules -> kJ)
                 metrics["total_work_kj"] = round(df['power'].sum() / 1000)
                 work_above_cp = df['power'][df['power'] > CP] - CP
                 metrics["total_work_above_cp_kj"] = round(work_above_cp.sum() / 1000)
 
-                # Time and Power metrics
                 grouped_state = df.groupby('state')
                 metrics["total_time_above"] = len(df[df['state'] == 'above'])
                 metrics["total_time_below"] = len(df[df['state'] == 'below'])
                 metrics["avg_power_above"] = round(df.loc[df['state'] == 'above', 'power'].mean()) if metrics["total_time_above"] > 0 else 0
                 metrics["avg_power_below"] = round(df.loc[df['state'] == 'below', 'power'].mean()) if metrics["total_time_below"] > 0 else 0
 
-                # Bouts calculation
                 bout_starts = df['state'].ne(df['state'].shift())
                 metrics["bouts_above"] = bout_starts[df['state'] == 'above'].sum()
                 metrics["bouts_below"] = bout_starts[df['state'] == 'below'].sum()
 
-                # Cadence metrics
                 pedaling_df = df[df['cadence'] > 0]
                 metrics["avg_cadence"] = round(pedaling_df['cadence'].mean()) if not pedaling_df.empty else 0
                 if not pedaling_df.empty:
@@ -380,16 +380,13 @@ if analyze_button:
                     metrics["avg_cadence_above"] = 0
                     metrics["avg_cadence_below"] = 0
 
-                # Coasting metrics
                 metrics["coasting_time"] = (df['cadence'] == 0).sum()
                 metrics["coasting_percent"] = round((metrics["coasting_time"] / len(df)) * 100) if len(df) > 0 else 0
                 
-                # Overall ride metrics
                 metrics["avg_power_overall"] = round(df['power'].mean())
                 metrics["avg_speed_overall"] = round(df['speed_kmh'].mean(), 1) if 'speed_kmh' in df.columns else 0
                 metrics["total_distance"] = round(df['distance'].max() / 1000, 2) if 'distance' in df.columns else 0
                 
-                # --- Further Analysis ---
                 power_zones_df = calculate_power_zones(df['power'], CP)
                 mmp_df = calculate_mmp_curve(df['power'])
                 top_above_bouts, top_below_bouts = find_top_bouts(df, CP)
@@ -453,7 +450,6 @@ if 'results' in st.session_state:
         c3.metric("Average Speed", f"{metrics.get('avg_speed_overall', 'N/A')} km/h")
 
         c4, c5, c6 = st.columns(3)
-        # --- [FIX] Use .get() to prevent KeyError ---
         total_work_val = metrics.get('total_work_kj', 'N/A')
         work_above_cp_val = metrics.get('total_work_above_cp_kj', 'N/A')
         
@@ -525,13 +521,29 @@ if 'results' in st.session_state:
             )
         ))
 
-        # Add W' depletion curves
+        # --- [EDIT] Improved depletion curve visualization ---
         max_duration = max(71, matches_df['Duration (s)'].max() + 10) if not matches_df.empty else 71
-        for depletion in range(10, 60, 10):
+        depletion_levels = range(10, 60, 10)
+        colors = plotly.colors.sequential.YlOrRd[::2] 
+
+        for i, depletion in enumerate(depletion_levels):
             durations = np.arange(1, max_duration)
             power_depletion = (WP * (depletion / 100) / durations) + CP
             magnitude = (power_depletion / CP) * 100
-            fig_matches.add_trace(go.Scatter(x=durations, y=magnitude, mode='lines', line=dict(dash='dot', color='grey'), name=f'{depletion}% W\' depletion'))
+            fig_matches.add_trace(go.Scatter(
+                x=durations, 
+                y=magnitude, 
+                mode='lines', 
+                line=dict(dash='dot', color=colors[i]), 
+                name=f'{depletion}% W\'',
+                showlegend=False # Hide from legend
+            ))
+            # Add annotation at the end of the line
+            fig_matches.add_annotation(
+                x=durations[-1], y=magnitude[-1],
+                text=f" {depletion}%", showarrow=False,
+                xanchor='left', font=dict(color=colors[i])
+            )
 
         fig_matches.update_layout(
             title_text='Match Magnitude vs. Duration', 
@@ -611,11 +623,16 @@ if 'results' in st.session_state:
             wbal_colormap = cm.LinearColormap(colors=['red', 'yellow', 'green', 'blue'], vmin=0, vmax=100)
             
             m_wbal = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB positron')
-            for i in range(len(gps_df) - 1):
-                p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
-                          gps_df[['position_lat', 'position_long']].iloc[i+1].values)
-                avg_wbal_percent = (gps_df['Wbal_percent'].iloc[i] + gps_df['Wbal_percent'].iloc[i+1]) / 2
-                folium.PolyLine([p1, p2], color=wbal_colormap(avg_wbal_percent), weight=5).add_to(m_wbal)
+            
+            # --- [EDIT] More performant map rendering ---
+            coordinates = list(zip(gps_df['position_lat'], gps_df['position_long']))
+            ColorLine(
+                positions=coordinates,
+                colors=gps_df['Wbal_percent'],
+                colormap=wbal_colormap,
+                weight=5
+            ).add_to(m_wbal)
+
             wbal_colormap.caption = "W' Balance (%) (Red=Empty, Blue=Full)"
             m_wbal.add_child(wbal_colormap)
             st_folium(m_wbal, width=1400, height=500)
