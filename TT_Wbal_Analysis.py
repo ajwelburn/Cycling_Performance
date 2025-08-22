@@ -292,7 +292,7 @@ def format_seconds_to_hms(seconds: float) -> str:
     return f"{hours}h {minutes}m {remaining_seconds}s"
 
 # --- Main App Interface ---
-st.title("🚴 W' Balance and Time Trial Analysis Tool")
+st.title("🚴 W' Balance and Time Trial Analysis Tool by Alex Welburn")
 st.markdown("Upload a `.fit` file and set your parameters to generate a detailed performance analysis.")
 
 # --- Sidebar for Inputs ---
