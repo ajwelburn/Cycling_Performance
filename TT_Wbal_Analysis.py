@@ -229,7 +229,7 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
         
         if power > threshold_power:
             if current_match is None:
-                current_match = {'start': i, 'powers': [power]}
+                current_match = {'start_index': i, 'powers': [power]}
             else:
                 current_match['powers'].append(power)
             below_counter = 0
@@ -252,7 +252,7 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
         w_prime_depleted = duration * (avg_power - cp)
         depletion_percent = (w_prime_depleted / w_prime) * 100 if w_prime > 0 else 0
         match_data.append({
-            "Start Time (s)": df['time'].iloc[match['start']],
+            "Start Time (s)": df['time'].iloc[match['start_index']],
             "Duration (s)": duration, 
             "Magnitude (%CP)": magnitude,
             "Depletion (% W')": depletion_percent
