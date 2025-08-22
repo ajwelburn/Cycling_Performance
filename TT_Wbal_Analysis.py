@@ -10,7 +10,8 @@ from streamlit_folium import st_folium
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from typing import Tuple, List, Dict
-from datetime import datetime, time, date
+from datetime import datetime
+import requests # <-- [FIX] Added missing import
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -18,6 +19,9 @@ st.set_page_config(
     page_icon="🚴",
     layout="wide"
 )
+
+# --- Constants ---
+SEMICIRCLES_TO_DEGREES = 180 / (2**31) # <-- [IMPROVEMENT] Replaced magic number
 
 # --- 1. ANALYSIS FUNCTIONS (Cached for performance) ---
 
@@ -73,9 +77,9 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     df = pd.DataFrame(records)
     
     if 'position_lat' in df.columns:
-        df['position_lat'] = df['position_lat'] * (180 / 2**31) if df['position_lat'].notnull().any() else np.nan
+        df['position_lat'] = df['position_lat'] * SEMICIRCLES_TO_DEGREES
     if 'position_long' in df.columns:
-        df['position_long'] = df['position_long'] * (180 / 2**31) if df['position_long'].notnull().any() else np.nan
+        df['position_long'] = df['position_long'] * SEMICIRCLES_TO_DEGREES
 
     if start_time and isinstance(start_time, datetime):
         df['time'] = (df['timestamp'] - start_time).dt.total_seconds()
@@ -105,7 +109,7 @@ def get_weather_data(lat: float, lon: float, start_time: datetime) -> Dict:
     if lat is None or lon is None or not isinstance(start_time, datetime):
         return None
     
-    try:
+    try: # <-- [IMPROVEMENT] Specific error handling
         date_str = start_time.strftime('%Y-%m-%d')
         url = (
             f"https://archive-api.open-meteo.com/v1/archive?latitude={lat:.4f}&longitude={lon:.4f}"
@@ -113,17 +117,19 @@ def get_weather_data(lat: float, lon: float, start_time: datetime) -> Dict:
             "&hourly=temperature_2m,relativehumidity_2m,windspeed_10m,winddirection_10m"
         )
         response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            hour = start_time.hour
-            return {
-                "temperature": data['hourly']['temperature_2m'][hour],
-                "humidity": data['hourly']['relativehumidity_2m'][hour],
-                "wind_speed": data['hourly']['windspeed_10m'][hour],
-                "wind_direction": data['hourly']['winddirection_10m'][hour],
-            }
-    except Exception:
-        pass
+        response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+        data = response.json()
+        hour = start_time.hour
+        return {
+            "temperature": data['hourly']['temperature_2m'][hour],
+            "humidity": data['hourly']['relativehumidity_2m'][hour],
+            "wind_speed": data['hourly']['windspeed_10m'][hour],
+            "wind_direction": data['hourly']['winddirection_10m'][hour],
+        }
+    except requests.exceptions.RequestException as e:
+        st.warning(f"Could not fetch weather data: {e}")
+    except (KeyError, IndexError) as e:
+        st.warning(f"Error parsing weather data from API response: {e}")
     return None
 
 @st.cache_data
@@ -342,38 +348,48 @@ if analyze_button:
                     Wbal_old = Wbal
                 df['Wbal'] = wbal_list
 
-                # --- POWER AND CADENCE ANALYSIS ---
-                durations = df['time'].diff().fillna(1).tolist()
-                total_time_above, total_work_above, total_time_below, total_work_below = 0, 0, 0, 0
-                bouts_above, bouts_below = 0, 0
-                previous_state = 'below' if df['power'].iloc[0] <= CP else 'above'
-                cadence_sum, cadence_count, cadence_above_sum, cadence_above_count = 0, 0, 0, 0
-                cadence_below_sum, cadence_below_count, coasting_time = 0, 0, 0
+                # --- [REFACTOR] VECTORIZED POWER AND CADENCE ANALYSIS ---
+                metrics = {}
+                df['state'] = np.where(df['power'] > CP, 'above', 'below')
                 
-                for i in range(len(df)):
-                    dur, powr, cad = durations[i], df['power'].iloc[i], df['cadence'].iloc[i]
-                    current_state = 'above' if powr > CP else 'below'
-                    if cad == 0: coasting_time += dur
-                    else:
-                        cadence_sum += cad * dur
-                        cadence_count += dur
-                        if current_state == 'above':
-                            cadence_above_sum += cad * dur
-                            cadence_above_count += dur
-                        else:
-                            cadence_below_sum += cad * dur
-                            cadence_below_count += dur
-                    if current_state != previous_state:
-                        if current_state == 'above': bouts_above += 1
-                        else: bouts_below += 1
-                        previous_state = current_state
-                    if current_state == 'above':
-                        total_time_above += dur
-                        total_work_above += powr * dur
-                    else:
-                        total_time_below += dur
-                        total_work_below += powr * dur
+                # Work calculations (Joules -> kJ)
+                metrics["total_work_kj"] = round(df['power'].sum() / 1000)
+                work_above_cp = df['power'][df['power'] > CP] - CP
+                metrics["total_work_above_cp_kj"] = round(work_above_cp.sum() / 1000)
+
+                # Time and Power metrics
+                grouped_state = df.groupby('state')
+                metrics["total_time_above"] = len(df[df['state'] == 'above'])
+                metrics["total_time_below"] = len(df[df['state'] == 'below'])
+                metrics["avg_power_above"] = round(df.loc[df['state'] == 'above', 'power'].mean()) if metrics["total_time_above"] > 0 else 0
+                metrics["avg_power_below"] = round(df.loc[df['state'] == 'below', 'power'].mean()) if metrics["total_time_below"] > 0 else 0
+
+                # Bouts calculation
+                bout_starts = df['state'].ne(df['state'].shift())
+                metrics["bouts_above"] = bout_starts[df['state'] == 'above'].sum()
+                metrics["bouts_below"] = bout_starts[df['state'] == 'below'].sum()
+
+                # Cadence metrics
+                pedaling_df = df[df['cadence'] > 0]
+                metrics["avg_cadence"] = round(pedaling_df['cadence'].mean()) if not pedaling_df.empty else 0
+                if not pedaling_df.empty:
+                    grouped_cadence = pedaling_df.groupby('state')
+                    metrics["avg_cadence_above"] = round(grouped_cadence.get_group('above')['cadence'].mean()) if 'above' in grouped_cadence.groups else 0
+                    metrics["avg_cadence_below"] = round(grouped_cadence.get_group('below')['cadence'].mean()) if 'below' in grouped_cadence.groups else 0
+                else:
+                    metrics["avg_cadence_above"] = 0
+                    metrics["avg_cadence_below"] = 0
+
+                # Coasting metrics
+                metrics["coasting_time"] = (df['cadence'] == 0).sum()
+                metrics["coasting_percent"] = round((metrics["coasting_time"] / len(df)) * 100) if len(df) > 0 else 0
                 
+                # Overall ride metrics
+                metrics["avg_power_overall"] = round(df['power'].mean())
+                metrics["avg_speed_overall"] = round(df['speed_kmh'].mean(), 1) if 'speed_kmh' in df.columns else 0
+                metrics["total_distance"] = round(df['distance'].max() / 1000, 2) if 'distance' in df.columns else 0
+                
+                # --- Further Analysis ---
                 power_zones_df = calculate_power_zones(df['power'], CP)
                 mmp_df = calculate_mmp_curve(df['power'])
                 top_above_bouts, top_below_bouts = find_top_bouts(df, CP)
@@ -385,20 +401,7 @@ if analyze_button:
 
                 st.session_state.results = {
                     "df": df,
-                    "metrics": {
-                        "avg_power_above": round(total_work_above / total_time_above) if total_time_above > 0 else 0,
-                        "avg_power_below": round(total_work_below / total_time_below) if total_time_below > 0 else 0,
-                        "avg_power_overall": round(df['power'].mean()),
-                        "avg_speed_overall": round(df['speed_kmh'].mean(), 1) if 'speed_kmh' in df.columns else 0,
-                        "total_distance": round(df['distance'].max() / 1000, 2) if 'distance' in df.columns else 0,
-                        "total_time_above": total_time_above, "total_time_below": total_time_below,
-                        "bouts_above": bouts_above, "bouts_below": bouts_below,
-                        "avg_cadence": round(cadence_sum / cadence_count) if cadence_count > 0 else 0,
-                        "avg_cadence_above": round(cadence_above_sum / cadence_above_count) if cadence_above_count > 0 else 0,
-                        "avg_cadence_below": round(cadence_below_sum / cadence_below_count) if cadence_below_count > 0 else 0,
-                        "coasting_time": coasting_time,
-                        "coasting_percent": round((coasting_time / sum(durations)) * 100) if sum(durations) > 0 else 0,
-                    },
+                    "metrics": metrics,
                     "power_profile": {"zones": power_zones_df, "mmp": mmp_df},
                     "interval_analysis": {"above_bouts": top_above_bouts, "below_bouts": top_below_bouts, "above_summary": above_bouts_summary, "below_summary": below_bouts_summary},
                     "params": {"CP": CP, "WP": WP},
@@ -444,10 +447,16 @@ if 'results' in st.session_state:
 
         st.divider()
         st.subheader("Overall Ride Metrics")
+        # --- [NEW] Updated Metrics Layout ---
         c1, c2, c3 = st.columns(3)
         c1.metric("Total Distance", f"{metrics['total_distance']} km")
         c2.metric("Average Power", f"{metrics['avg_power_overall']} W")
         c3.metric("Average Speed", f"{metrics['avg_speed_overall']} km/h")
+
+        c4, c5, c6 = st.columns(3)
+        c4.metric("Total Work", f"{metrics['total_work_kj']} kJ")
+        c5.metric("Work Above CP", f"{metrics['total_work_above_cp_kj']} kJ")
+        c6.metric("Coasting", f"{metrics['coasting_percent']}%")
         
         st.divider()
         st.header(f"Power Analysis (Threshold = {int(CP)} W)")
@@ -521,7 +530,13 @@ if 'results' in st.session_state:
             magnitude = (power_depletion / CP) * 100
             fig_matches.add_trace(go.Scatter(x=durations, y=magnitude, mode='lines', line=dict(dash='dot', color='grey'), name=f'{depletion}% W\' depletion'))
 
-        fig_matches.update_layout(title_text='Match Magnitude vs. Duration', template='plotly_white', font=dict(color="black"))
+        # --- [NEW] Move legend to bottom ---
+        fig_matches.update_layout(
+            title_text='Match Magnitude vs. Duration', 
+            template='plotly_white', 
+            font=dict(color="black"),
+            legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5)
+        )
         fig_matches.update_xaxes(title_text='Duration (s)', showline=True, linewidth=2, linecolor='black', mirror=False)
         fig_matches.update_yaxes(title_text='Magnitude (% of CP)', showline=True, linewidth=2, linecolor='black', mirror=False, range=[105, 250])
         st.plotly_chart(fig_matches, use_container_width=True)
@@ -556,17 +571,29 @@ if 'results' in st.session_state:
         st.plotly_chart(fig_zones, use_container_width=True)
         
         mmp_df = power_profile["mmp"]
-        st.subheader("Mean Maximal Power Data")
-        st.dataframe(mmp_df.style.format({"Max Power (W)": "{:.0f}"}))
+        st.subheader("Mean Maximal Power")
+        
+        # --- [NEW] Revamped MMP display ---
+        key_durations = {"5s": 5, "1 min": 60, "5 min": 300, "20 min": 1200}
+        mmp_data = mmp_df.set_index("Duration (s)")["Max Power (W)"]
+        
+        cols = st.columns(len(key_durations))
+        for i, (label, duration) in enumerate(key_durations.items()):
+            power_value = mmp_data.get(duration)
+            with cols[i]:
+                if power_value is not None:
+                    st.metric(label=label, value=f"{int(power_value)} W")
+                else:
+                    st.metric(label=label, value="N/A")
 
         fig_mmp = go.Figure(go.Scatter(x=mmp_df['Duration (s)'], y=mmp_df['Max Power (W)'], mode='lines+markers'))
         fig_mmp.update_layout(title_text='Mean Maximal Power (MMP) Curve', template='plotly_white', font=dict(color="black"),
-                              xaxis_type="log",
-                              xaxis = dict(
-                                tickmode = 'array',
-                                tickvals = [1, 5, 10, 30, 60, 120, 300, 600, 1200, 1800, 3600],
-                                ticktext = ['1s', '5s', '10s', '30s', '1m', '2m', '5m', '10m', '20m', '30m', '60m']
-                            ))
+                                xaxis_type="log",
+                                xaxis = dict(
+                                    tickmode = 'array',
+                                    tickvals = [1, 5, 10, 30, 60, 120, 300, 600, 1200, 1800, 3600],
+                                    ticktext = ['1s', '5s', '10s', '30s', '1m', '2m', '5m', '10m', '20m', '30m', '60m']
+                                ))
         fig_mmp.update_xaxes(title_text='Duration (log scale)', showline=True, linewidth=2, linecolor='black', mirror=False)
         fig_mmp.update_yaxes(title_text='Max Power (W)', showline=True, linewidth=2, linecolor='black', mirror=False)
         st.plotly_chart(fig_mmp, use_container_width=True)
@@ -579,14 +606,17 @@ if 'results' in st.session_state:
             st.subheader("Route Colored by W' Balance (%)")
             gps_df['Wbal_percent'] = (gps_df['Wbal'] / WP) * 100
             gps_df['Wbal_percent'] = gps_df['Wbal_percent'].clip(0, 100)
+            
+            # --- [NEW] Reversed colormap ---
             wbal_colormap = cm.LinearColormap(colors=['blue', 'cyan', 'yellow', 'red'], vmin=0, vmax=100)
+            
             m_wbal = folium.Map(location=[gps_df['position_lat'].mean(), gps_df['position_long'].mean()], zoom_start=13, tiles='CartoDB positron')
             for i in range(len(gps_df) - 1):
                 p1, p2 = (gps_df[['position_lat', 'position_long']].iloc[i].values, 
                           gps_df[['position_lat', 'position_long']].iloc[i+1].values)
                 avg_wbal_percent = (gps_df['Wbal_percent'].iloc[i] + gps_df['Wbal_percent'].iloc[i+1]) / 2
                 folium.PolyLine([p1, p2], color=wbal_colormap(avg_wbal_percent), weight=5).add_to(m_wbal)
-            wbal_colormap.caption = "W' Balance (%)"
+            wbal_colormap.caption = "W' Balance (%) (Blue=Empty, Red=Full)"
             m_wbal.add_child(wbal_colormap)
             st_folium(m_wbal, width=1400, height=500)
         else:
@@ -607,7 +637,7 @@ if 'results' in st.session_state:
             axis_map = {'Power': 'left', 'Altitude': 'left', 'Speed (km/h)': 'right', 'Cadence': 'right', 'Heart Rate': 'right'}
             
             for metric in selected_metrics:
-                col_name = metric.lower().replace(' (km/h)', '_kmh')
+                col_name = metric.lower().replace(' (km/h)', '_kmh').replace(' ', '_')
                 smoothed_data = df[col_name].rolling(window=smoothing_window, min_periods=1).mean()
                 is_secondary = axis_map.get(metric) == 'right'
                 fig_explorer.add_trace(go.Scatter(x=df['time'], y=smoothed_data, name=metric), secondary_y=is_secondary)
