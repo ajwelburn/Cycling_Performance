@@ -286,13 +286,17 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
         duration = len(match['powers'])
         avg_power = sum(match['powers']) / duration
         magnitude = (avg_power / cp) * 100
-        w_prime_depleted = duration * (avg_power - cp)
-        depletion_percent = (w_prime_depleted / w_prime) * 100 if w_prime > 0 else 0
+        w_prime_depleted_joules = duration * (avg_power - cp)
+        depletion_percent = (w_prime_depleted_joules / w_prime) * 100 if w_prime > 0 else 0
+        start_index = match['start_index']
+
         match_data.append({
-            "Start Time (s)": df['time'].iloc[match['start_index']],
+            "Start Time (s)": df['time'].iloc[start_index],
+            "Start Distance (km)": df['distance'].iloc[start_index] / 1000,
             "Duration (s)": duration, 
             "Magnitude (%CP)": magnitude,
-            "Depletion (% W')": depletion_percent
+            "Depletion (% W')": depletion_percent,
+            "Depletion (kJ)": w_prime_depleted_joules / 1000
         })
 
     summary = {
@@ -700,7 +704,6 @@ if 'results' in st.session_state:
         fig_depletion.update_yaxes(title_text="Power (W)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
         st.plotly_chart(fig_depletion, use_container_width=True)
 
-
     with tabs[2]: # Match Analysis
         st.header("Match Analysis")
         gap_tolerance = st.slider("Gap Tolerance (s)", min_value=0, max_value=10, value=3, help="Allowable time below threshold before ending a 'match'.")
@@ -757,6 +760,40 @@ if 'results' in st.session_state:
         fig_matches.update_xaxes(title_text='Duration (s)', showline=True, linewidth=2, linecolor='black', mirror=False)
         fig_matches.update_yaxes(title_text='Magnitude (% of CP)', showline=True, linewidth=2, linecolor='black', mirror=False, range=[105, 250])
         st.plotly_chart(fig_matches, use_container_width=True)
+
+        st.divider()
+        st.subheader("Top W' Depleting Efforts")
+        st.markdown("This table highlights the efforts that consumed the most `W'`, pinpointing the most anaerobically demanding moments of the ride.")
+
+        num_efforts = st.slider("Number of top efforts to display:", min_value=2, max_value=20, value=5)
+
+        if not matches_df.empty:
+            top_efforts_df = matches_df.sort_values(by="Depletion (kJ)", ascending=False).head(num_efforts)
+
+            display_df = top_efforts_df[[
+                "Start Time (s)",
+                "Start Distance (km)",
+                "Duration (s)",
+                "Magnitude (%CP)",
+                "Depletion (kJ)"
+            ]].copy()
+
+            display_df["Start Time (s)"] = display_df["Start Time (s)"].apply(lambda s: format_seconds_to_hms(s))
+            display_df["Start Distance (km)"] = display_df["Start Distance (km)"].map('{:.2f}'.format)
+            display_df["Magnitude (%CP)"] = display_df["Magnitude (%CP)"].map('{:.1f}%'.format)
+            display_df["Depletion (kJ)"] = display_df["Depletion (kJ)"].map('{:.2f}'.format)
+            
+            display_df.rename(columns={
+                "Start Time (s)": "Time",
+                "Start Distance (km)": "Distance (km)",
+                "Duration (s)": "Duration (s)",
+                "Magnitude (%CP)": "Magnitude",
+                "Depletion (kJ)": "W' Depleted (kJ)"
+            }, inplace=True)
+            
+            st.dataframe(display_df.reset_index(drop=True))
+        else:
+            st.info("No matches were found in this ride to analyze.")
 
     with tabs[3]: # Ride Profile
         st.header("Ride Profile Charts")
