@@ -367,6 +367,13 @@ def format_seconds_to_hms(seconds: float) -> str:
     remaining_seconds = int(seconds % 60)
     return f"{hours}h {minutes:02d}m {remaining_seconds:02d}s"
 
+def format_seconds_to_ms(seconds: float) -> str:
+    """Converts seconds into a 'Xm Ys' format."""
+    seconds = round(seconds)
+    minutes = int(seconds // 60)
+    remaining_seconds = int(seconds % 60)
+    return f"{minutes}m {remaining_seconds:02d}s"
+
 # --- Main App Interface ---
 st.title("🚴 W' Bal: TT and Race  Analysis Tool")
 st.markdown("Upload a `.fit` file and set your parameters to generate a detailed performance analysis.")
@@ -778,12 +785,12 @@ if 'results' in st.session_state:
             # Create a dataframe specifically for display formatting
             display_df = top_efforts_df.copy()
             display_df.insert(0, 'Effort #', range(1, 1 + len(display_df)))
-            display_df['Duration (min)'] = display_df['Duration (s)'] / 60
+            display_df['Duration'] = display_df['Duration (s)'].apply(format_seconds_to_ms)
             
             # Select and rename columns for the final table display
             final_display_df = display_df[[
                 'Effort #',
-                'Duration (min)',
+                'Duration',
                 'Avg Power (W)',
                 'Avg Power (W/kg)',
                 'Magnitude (%CP)',
@@ -799,11 +806,10 @@ if 'results' in st.session_state:
             st.dataframe(
                 final_display_df.style
                 .format({
-                    'Duration (min)': '{:.2f}',
                     'Avg Power': '{:.0f}',
                     'Avg W/kg': '{:.2f}',
                     'Magnitude': '{:.0f}%',
-                    'W\' Depleted (kJ)': '{:.2f}'
+                    "W' Depleted (kJ)": '{:.2f}'
                 })
                 .background_gradient(cmap='Reds', subset=["W' Depleted (kJ)"])
                 .background_gradient(cmap='viridis', subset=["Avg Power"])
