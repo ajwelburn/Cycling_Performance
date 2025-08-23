@@ -254,7 +254,7 @@ def analyze_bouts(df: pd.DataFrame, bouts: List[Dict], bout_type: str, cp: int) 
     return pd.DataFrame(summary)
 
 @st.cache_data
-def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: int) -> Tuple[pd.DataFrame, Dict]:
+def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: int, weight: float) -> Tuple[pd.DataFrame, Dict]:
     """Identifies and analyzes 'matches' burned above a threshold."""
     threshold_power = cp * 1.05
     matches = []
@@ -285,6 +285,7 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
     for match in matches:
         duration = len(match['powers'])
         avg_power = sum(match['powers']) / duration
+        avg_power_wkg = avg_power / weight if weight > 0 else 0
         magnitude = (avg_power / cp) * 100
         w_prime_depleted_joules = duration * (avg_power - cp)
         depletion_percent = (w_prime_depleted_joules / w_prime) * 100 if w_prime > 0 else 0
@@ -293,7 +294,9 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
         match_data.append({
             "Start Time (s)": df['time'].iloc[start_index],
             "Start Distance (km)": df['distance'].iloc[start_index] / 1000,
-            "Duration (s)": duration, 
+            "Duration (s)": duration,
+            "Avg Power (W)": avg_power,
+            "Avg Power (W/kg)": avg_power_wkg,
             "Magnitude (%CP)": magnitude,
             "Depletion (% W')": depletion_percent,
             "Depletion (kJ)": w_prime_depleted_joules / 1000
@@ -708,7 +711,7 @@ if 'results' in st.session_state:
         st.header("Match Analysis")
         gap_tolerance = st.slider("Gap Tolerance (s)", min_value=0, max_value=10, value=3, help="Allowable time below threshold before ending a 'match'.")
         
-        matches_df, matches_summary = calculate_matches(df, CP, WP, gap_tolerance)
+        matches_df, matches_summary = calculate_matches(df, CP, WP, gap_tolerance, weight)
         
         col1, col2, col3 = st.columns(3)
         col1.metric("Total Matches Burned", f"{matches_summary['Total Matches']}")
@@ -769,29 +772,96 @@ if 'results' in st.session_state:
 
         if not matches_df.empty:
             top_efforts_df = matches_df.sort_values(by="Depletion (kJ)", ascending=False).head(num_efforts)
-
+            
+            # --- MODIFICATION START ---
+            
+            # Create a dataframe specifically for display formatting
             display_df = top_efforts_df[[
                 "Start Time (s)",
-                "Start Distance (km)",
                 "Duration (s)",
+                "Avg Power (W)",
+                "Avg Power (W/kg)",
                 "Magnitude (%CP)",
                 "Depletion (kJ)"
             ]].copy()
 
             display_df["Start Time (s)"] = display_df["Start Time (s)"].apply(lambda s: format_seconds_to_hms(s))
-            display_df["Start Distance (km)"] = display_df["Start Distance (km)"].map('{:.2f}'.format)
             display_df["Magnitude (%CP)"] = display_df["Magnitude (%CP)"].map('{:.1f}%'.format)
-            display_df["Depletion (kJ)"] = display_df["Depletion (kJ)"].map('{:.2f}'.format)
             
             display_df.rename(columns={
                 "Start Time (s)": "Time",
-                "Start Distance (km)": "Distance (km)",
                 "Duration (s)": "Duration (s)",
+                "Avg Power (W)": "Avg Power",
+                "Avg Power (W/kg)": "Avg W/kg",
                 "Magnitude (%CP)": "Magnitude",
                 "Depletion (kJ)": "W' Depleted (kJ)"
             }, inplace=True)
             
-            st.dataframe(display_df.reset_index(drop=True))
+            # Use st.dataframe with style for visual engagement
+            st.dataframe(display_df.reset_index(drop=True).style
+                .format({
+                    "Avg Power": "{:.0f} W",
+                    "Avg W/kg": "{:.2f}",
+                    "W' Depleted (kJ)": "{:.2f}"
+                })
+                .background_gradient(cmap='Reds', subset=["W' Depleted (kJ)"])
+                .background_gradient(cmap='viridis', subset=["Avg Power"])
+                .background_gradient(cmap='plasma', subset=["Avg W/kg"])
+                .set_properties(**{'text-align': 'left'}),
+                use_container_width=True
+            )
+
+            # --- New Bar Chart ---
+            st.subheader("Top Efforts Chart")
+            chart_df = top_efforts_df.copy()
+            chart_df['Effort'] = [f"Effort #{i+1}" for i in range(len(chart_df))]
+
+            fig_top_efforts = make_subplots(specs=[[{"secondary_y": True}]])
+
+            # Bar chart for W' Depleted
+            fig_top_efforts.add_trace(
+                go.Bar(
+                    x=chart_df['Effort'],
+                    y=chart_df['Depletion (kJ)'],
+                    name="W' Depleted (kJ)",
+                    marker_color='indianred',
+                    hovertemplate =
+                        '<b>%{x}</b><br>' +
+                        'W\' Depleted: %{y:.2f} kJ<br>' +
+                        'Avg Power: %{customdata[0]:.0f} W<br>' +
+                        'Avg Power (W/kg): %{customdata[1]:.2f}<br>' +
+                        'Duration: %{customdata[2]}s<br>' +
+                        '<extra></extra>',
+                    customdata=chart_df[['Avg Power (W)', 'Avg Power (W/kg)', 'Duration (s)']]
+                ),
+                secondary_y=False
+            )
+
+            # Line chart for Avg Power
+            fig_top_efforts.add_trace(
+                go.Scatter(
+                    x=chart_df['Effort'],
+                    y=chart_df['Avg Power (W)'],
+                    name='Avg Power (W)',
+                    mode='lines+markers',
+                    line=dict(color='royalblue', dash='dash')
+                ),
+                secondary_y=True
+            )
+
+            fig_top_efforts.update_layout(
+                title_text="Top W' Depleting Efforts Analysis",
+                template='plotly_white',
+                barmode='group',
+                legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5)
+            )
+            fig_top_efforts.update_yaxes(title_text="<b>W' Depleted (kJ)</b>", secondary_y=False)
+            fig_top_efforts.update_yaxes(title_text="<b>Average Power (W)</b>", secondary_y=True)
+            fig_top_efforts.update_xaxes(title_text="Effort")
+            st.plotly_chart(fig_top_efforts, use_container_width=True)
+
+            # --- MODIFICATION END ---
+            
         else:
             st.info("No matches were found in this ride to analyze.")
 
@@ -1044,4 +1114,5 @@ elif not uploaded_file and analyze_button:
 
 else:
     if 'results' not in st.session_state:
-        st.info("Welcome to my W'bal race analysis tool. Please input your values on the left and upload a .fit file. If there are any bugs/issues or requests for certain features, please email me at a.j.welburn@lboro.ac.uk. Please feel free to share this app as well.")
+        # You can add a welcome message or instructions here
+        st.info("Welcome! Please upload a .fit file and click 'Analyze Ride' in the sidebar to begin.")
