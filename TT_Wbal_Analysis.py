@@ -776,42 +776,43 @@ if 'results' in st.session_state:
             # --- MODIFICATION START ---
             
             # Create a dataframe specifically for display formatting
-            display_df = top_efforts_df[[
-                "Start Time (s)",
-                "Duration (s)",
-                "Avg Power (W)",
-                "Avg Power (W/kg)",
-                "Magnitude (%CP)",
-                "Depletion (kJ)"
-            ]].copy()
+            display_df = top_efforts_df.copy()
+            display_df.insert(0, 'Effort #', range(1, 1 + len(display_df)))
+            display_df['Duration (min)'] = display_df['Duration (s)'] / 60
+            
+            # Select and rename columns for the final table display
+            final_display_df = display_df[[
+                'Effort #',
+                'Duration (min)',
+                'Avg Power (W)',
+                'Avg Power (W/kg)',
+                'Magnitude (%CP)',
+                'Depletion (kJ)'
+            ]].rename(columns={
+                'Avg Power (W)': 'Avg Power',
+                'Avg Power (W/kg)': 'Avg W/kg',
+                'Magnitude (%CP)': 'Magnitude',
+                'Depletion (kJ)': "W' Depleted (kJ)"
+            })
 
-            display_df["Start Time (s)"] = display_df["Start Time (s)"].apply(lambda s: format_seconds_to_hms(s))
-            display_df["Magnitude (%CP)"] = display_df["Magnitude (%CP)"].map('{:.1f}%'.format)
-            
-            display_df.rename(columns={
-                "Start Time (s)": "Time",
-                "Duration (s)": "Duration (s)",
-                "Avg Power (W)": "Avg Power",
-                "Avg Power (W/kg)": "Avg W/kg",
-                "Magnitude (%CP)": "Magnitude",
-                "Depletion (kJ)": "W' Depleted (kJ)"
-            }, inplace=True)
-            
-            # Use st.dataframe with style for visual engagement
-            st.dataframe(display_df.reset_index(drop=True).style
+            # Use st.dataframe with style for visual engagement and specific formatting
+            st.dataframe(
+                final_display_df.style
                 .format({
-                    "Avg Power": "{:.0f} W",
-                    "Avg W/kg": "{:.2f}",
-                    "W' Depleted (kJ)": "{:.2f}"
+                    'Duration (min)': '{:.2f}',
+                    'Avg Power': '{:.0f}',
+                    'Avg W/kg': '{:.2f}',
+                    'Magnitude': '{:.0f}%',
+                    'W\' Depleted (kJ)': '{:.2f}'
                 })
                 .background_gradient(cmap='Reds', subset=["W' Depleted (kJ)"])
                 .background_gradient(cmap='viridis', subset=["Avg Power"])
-                .background_gradient(cmap='plasma', subset=["Avg W/kg"])
                 .set_properties(**{'text-align': 'left'}),
-                use_container_width=True
+                use_container_width=True,
+                hide_index=True
             )
 
-            # --- New Bar Chart ---
+            # --- New Bar Chart with matching labels ---
             st.subheader("Top Efforts Chart")
             chart_df = top_efforts_df.copy()
             chart_df['Effort'] = [f"Effort #{i+1}" for i in range(len(chart_df))]
@@ -1116,3 +1117,4 @@ else:
     if 'results' not in st.session_state:
         # You can add a welcome message or instructions here
         st.info("Welcome! Please upload a .fit file and click 'Analyze Ride' in the sidebar to begin.")
+
