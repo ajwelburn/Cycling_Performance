@@ -154,6 +154,29 @@ def calculate_power_zones(power_data: pd.Series, cp: int) -> pd.DataFrame:
     return pd.DataFrame(zone_data)
 
 @st.cache_data
+def calculate_wbal_zones(wbal_percent_data: pd.Series) -> pd.DataFrame:
+    """Calculates time spent in W'bal percentage zones."""
+    bins = [-1, 10, 30, 50, 70, 101]
+    labels = [
+        "Danger Zone (0-10%)",
+        "Orange (10-30%)",
+        "Orange (30-50%)",
+        "Yellow (50-70%)",
+        "Green (70-100%)",
+    ]
+    
+    df_zones = pd.cut(wbal_percent_data, bins=bins, labels=labels, right=False).value_counts().reset_index()
+    df_zones.columns = ['Zone', 'Time (s)']
+    
+    df_zones['Zone'] = pd.Categorical(df_zones['Zone'], categories=labels[::-1], ordered=True)
+    df_zones = df_zones.sort_values('Zone').reset_index(drop=True)
+    
+    total_seconds = df_zones['Time (s)'].sum()
+    df_zones['Percentage'] = (df_zones['Time (s)'] / total_seconds) * 100 if total_seconds > 0 else 0
+    
+    return df_zones
+
+@st.cache_data
 def calculate_mmp_curve(power_data: pd.Series, weight: float) -> pd.DataFrame:
     """Calculates the Mean Maximal Power (MMP) curve in W and W/kg."""
     durations = sorted(list(set([1, 5, 10, 20, 30, 60, 120, 180, 300, 480, 600, 720, 1200, 1800, 3600])))
@@ -382,7 +405,7 @@ if analyze_button:
     if uploaded_file:
         WP = WP_kJ * 1000
         file_content = uploaded_file.getvalue()
-        df, parsed_start_time, missing_power_count = parse_fit_file(file_content)
+        df, missing_power_count, parsed_start_time = parse_fit_file(file_content)
 
         start_time = parsed_start_time
         if manual_time_override:
@@ -410,6 +433,7 @@ if analyze_button:
                     wbal_list.append(Wbal)
                     Wbal_old = Wbal
                 df['Wbal'] = wbal_list
+                df['wbal_percent'] = (df['Wbal'] / WP) * 100
 
                 # --- VECTORIZED POWER AND CADENCE ANALYSIS ---
                 metrics = {}
@@ -454,6 +478,7 @@ if analyze_button:
                 metrics["total_distance"] = round(df['distance'].max() / 1000, 2) if 'distance' in df.columns else 0
                 
                 power_zones_df = calculate_power_zones(df['power'], CP)
+                wbal_zones_df = calculate_wbal_zones(df['wbal_percent'])
                 mmp_df = calculate_mmp_curve(df['power'], weight)
                 top_above_bouts, top_below_bouts = find_top_bouts(df, CP)
                 above_bouts_summary = analyze_bouts(df, top_above_bouts, "Effort", CP)
@@ -466,6 +491,7 @@ if analyze_button:
                     "df": df,
                     "metrics": metrics,
                     "power_profile": {"zones": power_zones_df, "mmp": mmp_df},
+                    "wbal_zones": wbal_zones_df,
                     "interval_analysis": {"above_bouts": top_above_bouts, "below_bouts": top_below_bouts, "above_summary": above_bouts_summary, "below_summary": below_bouts_summary},
                     "params": {"CP": CP, "WP": WP, "Weight": weight},
                     "ride_info": {"start_time": start_time, "weather": weather_data}
@@ -598,7 +624,52 @@ if 'results' in st.session_state:
         fig_intervals.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False)
         fig_intervals.update_yaxes(title_text="Power (W)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
         st.plotly_chart(fig_intervals, use_container_width=True)
+        
+        st.subheader("W' Balance as a Percentage")
+        fig_wbal_percent = go.Figure()
+        fig_wbal_percent.add_trace(go.Scatter(x=df['time'], y=df['wbal_percent'], name='W\'bal (%)', line=dict(color='purple', width=2)))
+        fig_wbal_percent.add_hrect(y0=70, y1=100.1, line_width=0, fillcolor='green', opacity=0.2, layer="below")
+        fig_wbal_percent.add_hrect(y0=50, y1=70, line_width=0, fillcolor='yellow', opacity=0.2, layer="below")
+        fig_wbal_percent.add_hrect(y0=30, y1=50, line_width=0, fillcolor='orange', opacity=0.2, layer="below")
+        fig_wbal_percent.add_hrect(y0=10, y1=30, line_width=0, fillcolor='orange', opacity=0.3, layer="below")
+        fig_wbal_percent.add_hrect(y0=0, y1=10, line_width=0, fillcolor='#8B0000', opacity=0.3, layer="below")
 
+        fig_wbal_percent.add_annotation(
+            x=df['time'].mean(), y=5, text="Danger Zone", showarrow=False,
+            font=dict(color="white", size=12, family="Arial, sans-serif"),
+            xanchor='center', yanchor='middle'
+        )
+        fig_wbal_percent.update_layout(
+            title_text="W' Balance Percentage Over Time", template='plotly_white', font=dict(color="black"),
+            showlegend=True, yaxis_range=[0,105]
+        )
+        fig_wbal_percent.update_xaxes(title_text="Time (s)", showline=True, linewidth=2, linecolor='black', mirror=False)
+        fig_wbal_percent.update_yaxes(title_text="W'bal (%)", showline=True, linewidth=2, linecolor='black', mirror=False)
+        st.plotly_chart(fig_wbal_percent, use_container_width=True)
+
+        st.subheader("Time in W'bal Zones")
+        wbal_zones_df = results["wbal_zones"]
+        wbal_zones_df['Time (HMS)'] = wbal_zones_df['Time (s)'].apply(format_seconds_to_hms)
+        wbal_zones_df['Chart Text'] = wbal_zones_df.apply(lambda row: f"{row['Time (HMS)']} ({row['Percentage']:.1f}%)", axis=1)
+
+        zone_colors = {
+            "Green (70-100%)": 'green',
+            "Yellow (50-70%)": 'yellow',
+            "Orange (30-50%)": 'orange',
+            "Orange (10-30%)": 'darkorange',
+            "Danger Zone (0-10%)": '#8B0000'
+        }
+        fig_wbal_zones = go.Figure(go.Bar(
+            x=wbal_zones_df['Time (s)'], y=wbal_zones_df['Zone'], orientation='h',
+            text=wbal_zones_df['Chart Text'],
+            marker_color=[zone_colors.get(zone, 'grey') for zone in wbal_zones_df['Zone']]
+        ))
+        fig_wbal_zones.update_layout(title_text="Time Spent in W'bal Zones", template='plotly_white', font=dict(color="black"))
+        fig_wbal_zones.update_xaxes(title_text="Time (s)", showline=True, linewidth=2, linecolor='black', mirror=False)
+        fig_wbal_zones.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, categoryorder='array', categoryarray=wbal_zones_df['Zone'])
+        st.plotly_chart(fig_wbal_zones, use_container_width=True)
+        st.divider()
+        
         st.dataframe(interval_analysis['above_summary'])
         st.dataframe(interval_analysis['below_summary'])
         st.divider()
@@ -784,12 +855,12 @@ if 'results' in st.session_state:
 
             fig_mmp_wkg = go.Figure(go.Scatter(x=mmp_df['Duration (s)'], y=mmp_df['Max Power (W/kg)'], mode='lines+markers', line=dict(color='orange')))
             fig_mmp_wkg.update_layout(title_text='Mean Maximal Power (MMP) Curve (W/kg)', template='plotly_white', font=dict(color="black"),
-                                    xaxis_type="log",
-                                    xaxis = dict(
-                                        tickmode = 'array',
-                                        tickvals = [1, 5, 10, 30, 60, 120, 300, 600, 1200, 1800, 3600],
-                                        ticktext = ['1s', '5s', '10s', '30s', '1m', '2m', '5m', '10m', '20m', '30m', '60m']
-                                    ))
+                                        xaxis_type="log",
+                                        xaxis = dict(
+                                            tickmode = 'array',
+                                            tickvals = [1, 5, 10, 30, 60, 120, 300, 600, 1200, 1800, 3600],
+                                            ticktext = ['1s', '5s', '10s', '30s', '1m', '2m', '5m', '10m', '20m', '30m', '60m']
+                                        ))
             fig_mmp_wkg.update_xaxes(title_text='Duration (log scale)', showline=True, linewidth=2, linecolor='black', mirror=False)
             fig_mmp_wkg.update_yaxes(title_text='Max Power (W/kg)', showline=True, linewidth=2, linecolor='black', mirror=False)
             st.plotly_chart(fig_mmp_wkg, use_container_width=True)
@@ -936,5 +1007,4 @@ elif not uploaded_file and analyze_button:
 
 else:
     if 'results' not in st.session_state:
-        st.info("Upload a file and click 'Analyze Ride' to begin.")
-
+        st.info("Welcome to my W'bal race analysis tool. Please input your values on the left and upload a .fit file. If there are any bugs/issues or requests for certain features, please email me at a.j.welburn@lboro.ac.uk. Please feel free to share this app as well.")
