@@ -71,11 +71,19 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     start_time = session_start_time or first_record_time
     df = pd.DataFrame(records)
 
+    # **Handle missing timestamps gracefully (Improvement from suggestion)**
+    df = df.dropna(subset=['timestamp'])
+
     if start_time:
         df['time'] = (df['timestamp'] - start_time).dt.total_seconds()
     else:
         st.warning("Could not find a reliable start time. Using elapsed time from the start of data.")
         df['time'] = (df['timestamp'] - df['timestamp'].iloc[0]).dt.total_seconds()
+
+    # --- ✅ FIX APPLIED HERE ---
+    # Create the new time column that Plotly can format correctly.
+    df['time_hms'] = pd.to_timedelta(df['time'], unit='s')
+    # --- END FIX ---
 
     if 'position_lat' in df.columns and df['position_lat'].notnull().any():
         df['position_lat'] = df['position_lat'] * SEMICIRCLES_TO_DEGREES
@@ -92,7 +100,13 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
     if 'altitude' in df.columns: df['altitude'] = df['altitude'].fillna(method='ffill')
-    if 'speed' in df.columns: df['speed_kmh'] = df['speed'] * 3.6
+    if 'speed' in df.columns:
+        df['speed_kmh'] = df['speed'] * 3.6
+        # **Optional: Smooth speed data (Improvement from suggestion)**
+        df['speed_kmh'] = df['speed_kmh'].rolling(3, min_periods=1).mean()
+    # **Optional: Ensure distance is cumulative (Improvement from suggestion)**
+    if 'distance' in df.columns:
+        df['distance'] = df['distance'].cummax()
 
     return df, missing_power_count, start_time
 
@@ -577,18 +591,18 @@ if 'results' in st.session_state:
             power_to_plot = df['power']
         
         fig_intervals = make_subplots(specs=[[{"secondary_y": True}]])
-        # --- UPDATED: Use 'time' for data, format axis with tickformat ---
-        fig_intervals.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=False)
-        fig_intervals.add_trace(go.Scatter(x=df['time'], y=power_to_plot, name='Power', line=dict(color='grey', width=1)), secondary_y=True)
+        # --- ✅ FIX APPLIED HERE: Use 'time_hms' for the x-axis ---
+        fig_intervals.add_trace(go.Scatter(x=df['time_hms'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=False)
+        fig_intervals.add_trace(go.Scatter(x=df['time_hms'], y=power_to_plot, name='Power', line=dict(color='grey', width=1)), secondary_y=True)
+        # --- END FIX ---
         fig_intervals.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(color='rgba(214, 39, 40, 0.4)'), name='Top Effort'))
         fig_intervals.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(color='rgba(31, 119, 180, 0.4)'), name='Top Recovery'))
 
         for bout in interval_analysis['above_bouts']:
-            fig_intervals.add_vrect(x0=df['time'].iloc[bout['start']], x1=df['time'].iloc[bout['end']], fillcolor="red", opacity=0.2, layer="below", line_width=0)
+            fig_intervals.add_vrect(x0=df['time_hms'].iloc[bout['start']], x1=df['time_hms'].iloc[bout['end']], fillcolor="red", opacity=0.2, layer="below", line_width=0)
         for bout in interval_analysis['below_bouts']:
-            fig_intervals.add_vrect(x0=df['time'].iloc[bout['start']], x1=df['time'].iloc[bout['end']], fillcolor="blue", opacity=0.2, layer="below", line_width=0)
+            fig_intervals.add_vrect(x0=df['time_hms'].iloc[bout['start']], x1=df['time_hms'].iloc[bout['end']], fillcolor="blue", opacity=0.2, layer="below", line_width=0)
 
-        # --- UPDATED: Set y-axis range for W'bal ---
         min_wbal = df['wbal_kj'].min()
         yaxis_range = [min(0, min_wbal), (WP/1000) * 1.05]
 
@@ -600,14 +614,15 @@ if 'results' in st.session_state:
         
         st.subheader("W' Balance as a Percentage")
         fig_wbal_percent = go.Figure()
-        # --- UPDATED: Use 'time' for data, format axis with tickformat ---
-        fig_wbal_percent.add_trace(go.Scatter(x=df['time'], y=df['wbal_percent'], name='W\'bal (%)', line=dict(color='purple', width=2)))
+        # --- ✅ FIX APPLIED HERE: Use 'time_hms' for the x-axis ---
+        fig_wbal_percent.add_trace(go.Scatter(x=df['time_hms'], y=df['wbal_percent'], name='W\'bal (%)', line=dict(color='purple', width=2)))
+        # --- END FIX ---
         fig_wbal_percent.add_hrect(y0=70, y1=100.1, line_width=0, fillcolor='green', opacity=0.2, layer="below")
         fig_wbal_percent.add_hrect(y0=50, y1=70, line_width=0, fillcolor='yellow', opacity=0.2, layer="below")
         fig_wbal_percent.add_hrect(y0=30, y1=50, line_width=0, fillcolor='orange', opacity=0.2, layer="below")
         fig_wbal_percent.add_hrect(y0=10, y1=30, line_width=0, fillcolor='orange', opacity=0.3, layer="below")
         fig_wbal_percent.add_hrect(y0=0, y1=10, line_width=0, fillcolor='#8B0000', opacity=0.3, layer="below")
-        fig_wbal_percent.add_annotation(x=df['time'].iloc[len(df)//2], y=5, text="Danger Zone", showarrow=False, font=dict(color="white", size=12), xanchor='center', yanchor='middle')
+        fig_wbal_percent.add_annotation(x=df['time_hms'].iloc[len(df)//2], y=5, text="Danger Zone", showarrow=False, font=dict(color="white", size=12), xanchor='center', yanchor='middle')
         fig_wbal_percent.update_layout(title_text="W' Balance Percentage Over Time", template='plotly_white', font=dict(color="black"), showlegend=True, yaxis_range=[0,105])
         fig_wbal_percent.update_xaxes(title_text="Time (HH:MM:SS)", showline=True, linewidth=2, linecolor='black', mirror=False, tickformat='%H:%M:%S')
         fig_wbal_percent.update_yaxes(title_text="W'bal (%)", showline=True, linewidth=2, linecolor='black', mirror=False)
@@ -636,13 +651,13 @@ if 'results' in st.session_state:
         depletion_bouts = find_w_depletion_bouts(df, WP, depletion_threshold, max_duration, recovery_tolerance)
         st.markdown(f"Found **{len(depletion_bouts)}** efforts that met the criteria.")
         fig_depletion = make_subplots(specs=[[{"secondary_y": True}]])
-        # --- UPDATED: Use 'time' for data, format axis with tickformat ---
-        fig_depletion.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=False)
-        fig_depletion.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='grey', width=1)), secondary_y=True)
+        # --- ✅ FIX APPLIED HERE: Use 'time_hms' for the x-axis ---
+        fig_depletion.add_trace(go.Scatter(x=df['time_hms'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=False)
+        fig_depletion.add_trace(go.Scatter(x=df['time_hms'], y=df['power'], name='Power', line=dict(color='grey', width=1)), secondary_y=True)
+        # --- END FIX ---
         for bout in depletion_bouts:
-            fig_depletion.add_vrect(x0=df['time'].iloc[bout['start']], x1=df['time'].iloc[bout['end']], fillcolor="rgba(255, 165, 0, 0.3)", layer="below", line_width=0)
+            fig_depletion.add_vrect(x0=df['time_hms'].iloc[bout['start']], x1=df['time_hms'].iloc[bout['end']], fillcolor="rgba(255, 165, 0, 0.3)", layer="below", line_width=0)
         
-        # --- UPDATED: Set y-axis range for W'bal ---
         fig_depletion.update_layout(title_text=f"Efforts Depleting W' > {depletion_threshold}%", template='plotly_white', font=dict(color="black"), showlegend=True)
         fig_depletion.update_xaxes(title_text="Time (HH:MM:SS)", showline=True, linewidth=2, linecolor='black', mirror=False, tickformat='%H:%M:%S')
         fig_depletion.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False, range=yaxis_range)
@@ -700,12 +715,12 @@ if 'results' in st.session_state:
     with tabs[3]: # Ride Profile
         st.header("Ride Profile Charts")
         fig_wbal = make_subplots(specs=[[{"secondary_y": True}]])
-        # --- UPDATED: Use 'time' for data, format axis with tickformat ---
-        fig_wbal.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=False)
+        # --- ✅ FIX APPLIED HERE: Use 'time_hms' for the x-axis ---
+        fig_wbal.add_trace(go.Scatter(x=df['time_hms'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=False)
         if 'altitude' in df.columns and df['altitude'].notna().any():
-            fig_wbal.add_trace(go.Scatter(x=df['time'], y=df['altitude'], name='Elevation (m)', line=dict(color='#2ca02c', width=2), fill='tozeroy'), secondary_y=True)
+            fig_wbal.add_trace(go.Scatter(x=df['time_hms'], y=df['altitude'], name='Elevation (m)', line=dict(color='#2ca02c', width=2), fill='tozeroy'), secondary_y=True)
+        # --- END FIX ---
         
-        # --- UPDATED: Set y-axis range for W'bal ---
         min_wbal = df['wbal_kj'].min()
         yaxis_range = [min(0, min_wbal), (WP/1000) * 1.05]
 
@@ -715,9 +730,10 @@ if 'results' in st.session_state:
         fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, title_text="Elevation (m)", secondary_y=True)
         st.plotly_chart(fig_wbal, use_container_width=True)
         fig_power = go.Figure()
-        # --- UPDATED: Use 'time' for data, format axis with tickformat ---
-        fig_power.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='cyan', width=1)))
-        fig_power.add_shape(type="line", x0=df['time'].min(), y0=CP, x1=df['time'].max(), y1=CP, line=dict(color="#ff7f0e", width=2, dash="dash"), name=f"CP ({CP}W)")
+        # --- ✅ FIX APPLIED HERE: Use 'time_hms' for the x-axis ---
+        fig_power.add_trace(go.Scatter(x=df['time_hms'], y=df['power'], name='Power', line=dict(color='cyan', width=1)))
+        fig_power.add_shape(type="line", x0=df['time_hms'].min(), y0=CP, x1=df['time_hms'].max(), y1=CP, line=dict(color="#ff7f0e", width=2, dash="dash"), name=f"CP ({CP}W)")
+        # --- END FIX ---
         fig_power.update_layout(title_text='Power over Time', template='plotly_white', font=dict(color="black"))
         fig_power.update_xaxes(title_text="Time (HH:MM:SS)", showline=True, linewidth=2, linecolor='black', mirror=False, tickformat='%H:%M:%S')
         fig_power.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
@@ -804,7 +820,9 @@ if 'results' in st.session_state:
                 col_name = metric.lower().replace(' (km/h)', '_kmh').replace(' ', '_')
                 smoothed_data = df[col_name].rolling(window=smoothing_window, min_periods=1).mean()
                 is_secondary = axis_map.get(metric) == 'right'
-                fig_explorer.add_trace(go.Scatter(x=df['time'], y=smoothed_data, name=metric), secondary_y=is_secondary)
+                # --- ✅ FIX APPLIED HERE: Use 'time_hms' for the x-axis ---
+                fig_explorer.add_trace(go.Scatter(x=df['time_hms'], y=smoothed_data, name=metric), secondary_y=is_secondary)
+                # --- END FIX ---
             fig_explorer.update_layout(title_text='Data Explorer', template='plotly_white', font=dict(color="black"))
             fig_explorer.update_xaxes(title_text="Time (HH:MM:SS)", showline=True, linewidth=2, linecolor='black', mirror=False, tickformat='%H:%M:%S')
             fig_explorer.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False)
@@ -858,6 +876,12 @@ if 'results' in st.session_state:
             df2_aligned = df2.iloc[start_idx2:].copy()
             df1_aligned['time'] = df1_aligned['time'] - df1_aligned['time'].iloc[0]
             df2_aligned['time'] = df2_aligned['time'] - df2_aligned['time'].iloc[0]
+
+            # --- ✅ FIX APPLIED HERE: Create timedelta columns after aligning time ---
+            df1_aligned['time_hms'] = pd.to_timedelta(df1_aligned['time'], unit='s')
+            df2_aligned['time_hms'] = pd.to_timedelta(df2_aligned['time'], unit='s')
+            # --- END FIX ---
+
             comp_cols = st.columns(2)
             with comp_cols[0]:
                 st.markdown("#### Ride 1 (Primary)")
@@ -870,9 +894,10 @@ if 'results' in st.session_state:
                 st.metric("Avg Speed", f"{df2_aligned['speed_kmh'].mean():.1f} km/h")
                 st.metric("Total Distance", f"{df2_aligned['distance'].max() / 1000:.2f} km")
             fig_comp = go.Figure()
-            # --- UPDATED: Use 'time' for data, format axis with tickformat ---
-            fig_comp.add_trace(go.Scatter(x=df1_aligned['time'], y=df1_aligned['power'], name='Ride 1 Power', line=dict(color='blue')))
-            fig_comp.add_trace(go.Scatter(x=df2_aligned['time'], y=df2_aligned['power'], name='Ride 2 Power', line=dict(color='red')))
+            # --- ✅ FIX APPLIED HERE: Use 'time_hms' for the x-axis ---
+            fig_comp.add_trace(go.Scatter(x=df1_aligned['time_hms'], y=df1_aligned['power'], name='Ride 1 Power', line=dict(color='blue')))
+            fig_comp.add_trace(go.Scatter(x=df2_aligned['time_hms'], y=df2_aligned['power'], name='Ride 2 Power', line=dict(color='red')))
+            # --- END FIX ---
             fig_comp.update_layout(title_text='Power Comparison (Aligned by Start of Movement)', template='plotly_white', xaxis_tickformat='%H:%M:%S')
             st.plotly_chart(fig_comp, use_container_width=True)
         else:
