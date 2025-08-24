@@ -27,27 +27,34 @@ SEMICIRCLES_TO_DEGREES = 180 / (2**31)
 
 # --- 1. ANALYSIS FUNCTIONS (Cached for performance) ---
 
+# ********************************************************************
+# >>> START OF REPLACEMENT BLOCK <<<
+# Replace your old 'parse_fit_file' function with this new one.
+# ********************************************************************
 @st.cache_data
 def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     """
     Parses the in-memory .fit file content into a pandas DataFrame.
-    Returns the DataFrame, missing power count, and the ride start time.
+    (Corrected Version) - This version preserves the original timestamp and
+    creates a 'time' column for elapsed seconds, ensuring the ride date is never lost.
     """
     records = []
-    file_id_time, session_time, first_record_time = None, None, None
-    
+    # --- Simplified start_time logic ---
+    # We will prioritize the 'session' start_time and use the first 'record' as a fallback.
+    session_start_time = None
+    first_record_time = None
+
     try:
         with io.BytesIO(file_content) as fit_file:
             with fitdecode.FitReader(fit_file) as fit:
                 for frame in fit:
                     if frame.frame_type == fitdecode.FIT_FRAME_DATA:
-                        if frame.name == "file_id" and frame.has_field("time_created"):
-                            file_id_time = frame.get_value("time_created")
-                        
-                        elif frame.name == "session" and frame.has_field("start_time"):
-                            session_time = frame.get_value("start_time")
+                        # Prioritize the session message for the most accurate start time
+                        if frame.name == "session" and frame.has_field("start_time"):
+                            session_start_time = frame.get_value("start_time")
 
                         elif frame.name == "record":
+                            # Keep track of the first record's timestamp as a fallback
                             if first_record_time is None and frame.has_field("timestamp"):
                                 first_record_time = frame.get_value("timestamp")
 
@@ -63,6 +70,7 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
                                 "position_lat": frame.get_value("position_lat", fallback=None),
                                 "position_long": frame.get_value("position_long", fallback=None),
                             }
+                            # Only append records that have a timestamp
                             if record_data["timestamp"] is not None:
                                 records.append(record_data)
 
@@ -70,32 +78,40 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
         st.error(f"Error decoding .fit file: {e}")
         return pd.DataFrame(), 0, None
 
-    start_time = file_id_time or session_time or first_record_time
-
     if not records:
         st.warning("The selected .fit file contains no data records.")
         return pd.DataFrame(), 0, None
 
+    # Determine the definitive start time
+    start_time = session_start_time or first_record_time
+
     df = pd.DataFrame(records)
-    
+
+    # --- Preserve 'timestamp' and create 'time' for elapsed seconds ---
+    # Your code relies on a column named 'time' for plotting and calculations.
+    # We will create it here without deleting the original 'timestamp' column.
+    if start_time:
+        df['time'] = (df['timestamp'] - start_time).dt.total_seconds()
+    else:
+        # Fallback if no start time is found at all
+        st.warning("Could not find a reliable start time. Using elapsed time from the start of data.")
+        df['time'] = (df['timestamp'] - df['timestamp'].iloc[0]).dt.total_seconds()
+
+    # The original 'timestamp' column is now preserved for date/time info!
+    # df.drop(columns=['timestamp'], inplace=True, errors='ignore') # <-- We no longer do this.
+
+    # Convert GPS data (no changes here, your logic is correct)
     if 'position_lat' in df.columns and df['position_lat'].notnull().any():
         df['position_lat'] = df['position_lat'] * SEMICIRCLES_TO_DEGREES
     if 'position_long' in df.columns and df['position_long'].notnull().any():
         df['position_long'] = df['position_long'] * SEMICIRCLES_TO_DEGREES
 
-    if not start_time and not df.empty:
-        st.warning("Could not find a reliable start time in the file. Using elapsed time from the first record unless a manual time is set.")
-        df['time'] = (df['timestamp'] - df['timestamp'].iloc[0]).dt.total_seconds()
-    elif start_time:
-        df['time'] = (df['timestamp'] - start_time).dt.total_seconds()
-        
-    df.drop(columns=['timestamp'], inplace=True, errors='ignore')
-
+    # Data cleaning (no changes here, your logic is correct)
     missing_power_count = df['power'].isnull().sum()
     if missing_power_count > 0:
         st.warning(f"Note: Found and replaced {missing_power_count} missing power data point(s) with 0.")
     df['power'] = df['power'].fillna(0)
-    
+
     for col in ['power', 'cadence', 'heart_rate', 'speed', 'distance', 'temperature']:
         if col not in df.columns: df[col] = np.nan
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
@@ -104,6 +120,10 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     if 'speed' in df.columns: df['speed_kmh'] = df['speed'] * 3.6
 
     return df, missing_power_count, start_time
+# ********************************************************************
+# >>> END OF REPLACEMENT BLOCK <<<
+# The rest of the code is unchanged.
+# ********************************************************************
 
 @st.cache_data
 def get_weather_data(lat: float, lon: float, start_time: datetime) -> Dict:
@@ -335,7 +355,7 @@ def find_w_depletion_bouts(df: pd.DataFrame, w_prime: float, depletion_threshold
             if recovery_counter > recovery_tolerance_s or i == len(df) - 1:
                 in_bout = False
                 # The actual end of the effort was before the recovery period started
-                bout_end_index = i - recovery_counter 
+                bout_end_index = i - recovery_counter
                 
                 duration = bout_end_index - bout_start_index
                 
@@ -375,7 +395,7 @@ def format_seconds_to_ms(seconds: float) -> str:
     return f"{minutes}m {remaining_seconds:02d}s"
 
 # --- Main App Interface ---
-st.title("🚴 W' Bal: TT and Race  Analysis Tool")
+st.title("🚴 W' Bal: TT and Race Analysis Tool")
 st.markdown("Upload a `.fit` file and set your parameters to generate a detailed performance analysis.")
 
 # --- Sidebar for Inputs ---
@@ -727,9 +747,9 @@ if 'results' in st.session_state:
 
         fig_matches = go.Figure()
         fig_matches.add_trace(go.Scatter(
-            x=matches_df['Duration (s)'], 
-            y=matches_df['Magnitude (%CP)'], 
-            mode='markers', 
+            x=matches_df['Duration (s)'],
+            y=matches_df['Magnitude (%CP)'],
+            mode='markers',
             name='Matches',
             marker=dict(
                 color=matches_df["Depletion (% W')"],
@@ -741,17 +761,17 @@ if 'results' in st.session_state:
 
         max_duration = max(71, matches_df['Duration (s)'].max() + 10) if not matches_df.empty else 71
         depletion_levels = range(10, 60, 10)
-        colors = plotly.colors.sequential.YlOrRd[::2] 
+        colors = plotly.colors.sequential.YlOrRd[::2]
 
         for i, depletion in enumerate(depletion_levels):
             durations = np.arange(1, max_duration)
             power_depletion = (WP * (depletion / 100) / durations) + CP
             magnitude = (power_depletion / CP) * 100
             fig_matches.add_trace(go.Scatter(
-                x=durations, 
-                y=magnitude, 
-                mode='lines', 
-                line=dict(dash='dot', color=colors[i]), 
+                x=durations,
+                y=magnitude,
+                mode='lines',
+                line=dict(dash='dot', color=colors[i]),
                 name=f'{depletion}% W\'',
                 showlegend=False
             ))
@@ -762,8 +782,8 @@ if 'results' in st.session_state:
             )
 
         fig_matches.update_layout(
-            title_text='Match Magnitude vs. Duration', 
-            template='plotly_white', 
+            title_text='Match Magnitude vs. Duration',
+            template='plotly_white',
             font=dict(color="black"),
             legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5)
         )
@@ -880,7 +900,7 @@ if 'results' in st.session_state:
             fig_wbal.add_trace(go.Scatter(x=df['time'], y=df['altitude'], name='Elevation (m)', line=dict(color='#2ca02c', width=2), fill='tozeroy'), secondary_y=True)
         fig_wbal.update_layout(title_text='W\' Balance vs. Elevation', template='plotly_white', font=dict(color="black"))
         fig_wbal.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
-        fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, title_text="W'bal (kJ)", secondary_y=False); 
+        fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, title_text="W'bal (kJ)", secondary_y=False);
         fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, title_text="Elevation (m)", secondary_y=True)
         st.plotly_chart(fig_wbal, use_container_width=True)
 
@@ -1123,4 +1143,3 @@ else:
     if 'results' not in st.session_state:
         # You can add a welcome message or instructions here
         st.info("Welcome! Please upload a .fit file and click 'Analyze Ride' in the sidebar to begin.")
-
