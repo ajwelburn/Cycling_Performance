@@ -15,7 +15,6 @@ import requests
 from folium.features import ColorLine
 import plotly.colors
 
-# --- Page Configuration ---
 st.set_page_config(
     page_title="W'bal Analysis Tool",
     page_icon="🚴",
@@ -24,9 +23,7 @@ st.set_page_config(
 SEMICIRCLES_TO_DEGREES = 180 / (2**31)
 @st.cache_data
 def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
-    """
-    Parses the in-memory .fit file content into a pandas DataFrame.
-    """
+  #fitfile section for reading - still issues with some data stamps
     records = []
     session_start_time = None
     first_record_time = None
@@ -61,16 +58,13 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
         st.warning("The selected .fit file contains no data records.")
         return pd.DataFrame(), 0, None
     start_time = session_start_time or first_record_time
-    df = pd.DataFrame(records)
-    
+    df = pd.DataFrame(records)    
     df = df.dropna(subset=['timestamp'])
-
     if start_time:
         df['time'] = (df['timestamp'] - start_time).dt.total_seconds()
     else:
         st.warning("Could not find a reliable start time. Using elapsed time from the start of data.")
         df['time'] = (df['timestamp'] - df['timestamp'].iloc[0]).dt.total_seconds()
-    
     df['time_hms'] = pd.to_datetime(df['time'], unit='s')
     if 'position_lat' in df.columns and df['position_lat'].notnull().any():
         df['position_lat'] = df['position_lat'] * SEMICIRCLES_TO_DEGREES
@@ -90,7 +84,7 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     if 'distance' in df.columns:
         df['distance'] = df['distance'].cummax()
     return df, missing_power_count, start_time
-
+    #weather data api access - still unsure on this segment, need to validate this.
 @st.cache_data
 def get_weather_data(lat: float, lon: float, start_time: datetime) -> Dict:
     """Fetches historical weather data from Open-Meteo API."""
@@ -118,7 +112,6 @@ def get_weather_data(lat: float, lon: float, start_time: datetime) -> Dict:
     except (KeyError, IndexError) as e:
         st.warning(f"Error parsing weather data from API response: {e}")
     return None
-
 @st.cache_data
 def calculate_power_zones(power_data: pd.Series, cp: int) -> pd.DataFrame:
     """Calculates time spent in 7 power zones based on CP."""
@@ -137,7 +130,6 @@ def calculate_power_zones(power_data: pd.Series, cp: int) -> pd.DataFrame:
     total_seconds = sum(zone_counts.values())
     zone_data = [{"Zone": name, "Time (s)": s, "Percentage": (s / total_seconds) * 100 if total_seconds > 0 else 0} for name, s in zone_counts.items()]
     return pd.DataFrame(zone_data)
-
 @st.cache_data
 def calculate_wbal_zones(wbal_percent_data: pd.Series) -> pd.DataFrame:
     """Calculates time spent in W'bal percentage zones."""
@@ -153,7 +145,6 @@ def calculate_wbal_zones(wbal_percent_data: pd.Series) -> pd.DataFrame:
     total_seconds = df_zones['Time (s)'].sum()
     df_zones['Percentage'] = (df_zones['Time (s)'] / total_seconds) * 100 if total_seconds > 0 else 0
     return df_zones
-
 @st.cache_data
 def calculate_mmp_curve(power_data: pd.Series, weight: float) -> pd.DataFrame:
     """Calculates the Mean Maximal Power (MMP) curve in W and W/kg."""
@@ -165,18 +156,15 @@ def calculate_mmp_curve(power_data: pd.Series, weight: float) -> pd.DataFrame:
     else:
         mmp_df["Max Power (W/kg)"] = 0
     return mmp_df
-
 @st.cache_data
 def find_top_bouts(df: pd.DataFrame, cp: int, buffer_duration: int = 5) -> Tuple[List[Dict], List[Dict]]:
-    """Identifies the top 3 longest bouts above and below CP."""
+  # Top 3 efforts about and below CP - makes it look nice on a graph, well it should
     bouts = []
     current_bout = None
     buffer = 0
-
     for i in range(len(df)):
         power = df['power'].iloc[i]
         state = 'above' if power > cp else 'below'
-
         if current_bout is None:
             current_bout = {'state': state, 'start': i, 'end': i, 'duration': 1}
             buffer = 0
@@ -190,28 +178,21 @@ def find_top_bouts(df: pd.DataFrame, cp: int, buffer_duration: int = 5) -> Tuple
                 bouts.append(current_bout)
                 current_bout = {'state': state, 'start': i, 'end': i, 'duration': 1}
                 buffer = 0
-    
     if current_bout:
         bouts.append(current_bout)
-
     above_bouts = sorted([b for b in bouts if b['state'] == 'above'], key=lambda x: x['duration'], reverse=True)
     below_bouts = sorted([b for b in bouts if b['state'] == 'below'], key=lambda x: x['duration'], reverse=True)
-
     return above_bouts[:3], below_bouts[:3]
 
 @st.cache_data
 def analyze_bouts(df: pd.DataFrame, bouts: List[Dict], bout_type: str, cp: int) -> pd.DataFrame:
-    """Analyzes a list of bouts and returns a summary DataFrame."""
     summary = []
     for i, bout in enumerate(bouts):
         bout_df = df.iloc[bout['start']:bout['end']]
         if bout_df.empty: continue
-        
         wbal_change = bout_df['Wbal'].iloc[-1] - bout_df['Wbal'].iloc[0]
-        
         pedaling_cadence = bout_df['cadence'][bout_df['cadence'] > 0]
         avg_cadence = round(pedaling_cadence.mean()) if not pedaling_cadence.empty else 0
-
         bout_summary = {
             "Bout": f"{bout_type} Bout {i+1}",
             "Duration (s)": bout['duration'],
@@ -225,7 +206,6 @@ def analyze_bouts(df: pd.DataFrame, bouts: List[Dict], bout_type: str, cp: int) 
         else: # Recovery
             bout_summary["Avg Power < CP (W)"] = round(cp - bout_df['power'].mean())
         summary.append(bout_summary)
-    
     return pd.DataFrame(summary)
 @st.cache_data
 def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: int, weight: float) -> Tuple[pd.DataFrame, Dict]:
@@ -290,7 +270,7 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
     return pd.DataFrame(match_data), summary
 @st.cache_data
 def find_w_depletion_bouts(df: pd.DataFrame, w_prime: float, depletion_threshold_percent: int, max_duration_s: int, recovery_tolerance_s: int) -> List[Dict]:
-    """Identifies all efforts that deplete W' by a given percentage within a max duration, allowing for short recoveries."""
+  #W'bal depleter - select the depleting bouts with set metrics, adjust below, i think.
     bouts = []
     in_bout = False
     bout_start_index = 0
@@ -367,6 +347,7 @@ if uploaded_file and uploaded_file.name != st.session_state.current_file:
     st.session_state.current_file = uploaded_file.name
     if 'results' in st.session_state:
         del st.session_state['results']
+        #the good stuff the W'bal code below, just running if and else function, on second by second W'bal bits.
 if analyze_button:
     if uploaded_file:
         WP = WP_kJ * 1000
