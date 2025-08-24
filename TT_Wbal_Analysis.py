@@ -23,6 +23,7 @@ st.set_page_config(
 SEMICIRCLES_TO_DEGREES = 180 / (2**31)
 @st.cache_data
 def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
+    
   #fitfile section for reading - still issues with some data stamps
     records = []
     session_start_time = None
@@ -87,7 +88,8 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     #weather data api access - still unsure on this segment, need to validate this.
 @st.cache_data
 def get_weather_data(lat: float, lon: float, start_time: datetime) -> Dict:
-    """Fetches historical weather data from Open-Meteo API."""
+    
+#weather data - some API with open meteo [Should look at others]
     if lat is None or lon is None or not isinstance(start_time, datetime):
         return None
     try:
@@ -114,7 +116,8 @@ def get_weather_data(lat: float, lon: float, start_time: datetime) -> Dict:
     return None
 @st.cache_data
 def calculate_power_zones(power_data: pd.Series, cp: int) -> pd.DataFrame:
-    """Calculates time spent in 7 power zones based on CP."""
+  #zones for from CP - devlop further to include W' and pmax into this.
+    
     zones = {
         "Zone 1": (0, 0.55), "Zone 2": (0.55, 0.75), "Zone 3": (0.75, 0.90),
         "Zone 4": (0.90, 1.05), "Zone 5": (1.05, 1.20), "Zone 6": (1.20, 1.50),
@@ -132,7 +135,7 @@ def calculate_power_zones(power_data: pd.Series, cp: int) -> pd.DataFrame:
     return pd.DataFrame(zone_data)
 @st.cache_data
 def calculate_wbal_zones(wbal_percent_data: pd.Series) -> pd.DataFrame:
-    """Calculates time spent in W'bal percentage zones."""
+#Alex's W'bl zones - best way to impliment these - could look to include users specicific zones based on previoulsy having deplete. 
     bins = [-1, 10, 30, 50, 70, 101]
     labels = [
         "Danger Zone (0-10%)", "Orange (10-30%)", "Orange (30-50%)",
@@ -147,7 +150,8 @@ def calculate_wbal_zones(wbal_percent_data: pd.Series) -> pd.DataFrame:
     return df_zones
 @st.cache_data
 def calculate_mmp_curve(power_data: pd.Series, weight: float) -> pd.DataFrame:
-    """Calculates the Mean Maximal Power (MMP) curve in W and W/kg."""
+    
+  #MMP CURVES and W/kg
     durations = sorted(list(set([1, 5, 10, 20, 30, 60, 120, 180, 300, 480, 600, 720, 1200, 1800, 3600])))
     mmp_w = {d: power_data.rolling(window=d).mean().max() for d in durations if len(power_data) >= d}
     mmp_df = pd.DataFrame(list(mmp_w.items()), columns=["Duration (s)", "Max Power (W)"])
@@ -208,8 +212,9 @@ def analyze_bouts(df: pd.DataFrame, bouts: List[Dict], bout_type: str, cp: int) 
         summary.append(bout_summary)
     return pd.DataFrame(summary)
 @st.cache_data
+
+#Match section- 
 def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: int, weight: float) -> Tuple[pd.DataFrame, Dict]:
-    """Identifies and analyzes 'matches' burned above a threshold."""
     threshold_power = cp * 1.05
     matches = []
     current_match = None
@@ -299,37 +304,36 @@ def find_w_depletion_bouts(df: pd.DataFrame, w_prime: float, depletion_threshold
                         bouts.append({'start': bout_start_index, 'end': bout_end_index, 'depletion': depletion_percent})
                 recovery_counter = 0
     return bouts
+    
 def get_time_of_day(hour: int) -> str:
     """Categorizes the hour into Morning, Afternoon, or Evening."""
     if 5 <= hour < 12: return "Morning"
     elif 12 <= hour < 18: return "Afternoon"
     else: return "Evening"
 def format_seconds_to_hms(seconds: float) -> str:
-    """Converts seconds into a 'Xh Ym Zs' format."""
     seconds = round(seconds)
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     remaining_seconds = int(seconds % 60)
     return f"{hours}h {minutes:02d}m {remaining_seconds:02d}s"
 def format_seconds_to_ms(seconds: float) -> str:
-    """Converts seconds into a 'Xm Ys' format."""
     seconds = round(seconds)
     minutes = int(seconds // 60)
     remaining_seconds = int(seconds % 60)
     return f"{minutes}m {remaining_seconds:02d}s"
 
 st.title("🚴 W' Bal: TT and Race Analysis Tool")
-st.markdown("Upload a `.fit` file and set your parameters to generate a detailed performance analysis.")
+st.markdown("Upload a `.fit` file, adjust parameters, and select analyse")
 with st.sidebar:
     st.header("1. Upload Activity File")
     uploaded_file = st.file_uploader("Choose a .fit file", type="fit")
-    st.caption("Note: Created by Alex Welburn. Your data is processed in memory and is deleted when you close the browser tab.")
+    st.caption("Note: Created by Alex Welburn. Your data is processed in memory and is deleted when you close the browser tab no data is stored.")
     
     st.header("2. Input Parameters")
     weight = st.number_input('Weight (kg)', value=75.0, min_value=30.0, max_value=200.0, step=0.5, format="%.1f")
     CP = st.number_input('Critical Power (CP) in Watts', value=350, step=1)
     WP_kJ = st.number_input('W\' (W prime) in kJ', value=20.0, step=1.0, format="%.1f")
-    st.caption("*This is for the W'bal model*")
+    st.caption("*This is for the W'bal model for the tau function*")
     A = st.number_input('Parameter A', value=5187, step=1)
     B = st.number_input('Parameter B', value=-0.70, format="%.2f")
     st.header("3. Manual Start Time (Optional)")
@@ -362,6 +366,7 @@ if analyze_button:
             if 'results' in st.session_state: del st.session_state['results']
         else:
             with st.spinner("Analyzing..."):
+                #Wbal function - my variation from excel, using the ODE equation.
                 Wbal, Wbal_old = float(WP), float(WP)
                 wbal_list = [float(WP)]
                 power_np = df['power'].to_numpy()
@@ -431,7 +436,7 @@ if analyze_button:
                     if not df2.empty:
                         st.session_state.results["df2"] = df2
     else:
-        st.warning("Please upload a .fit file first.")
+        st.warning("Please upload a .fit file first, I won't work otherwise")
 if 'results' in st.session_state:
     results = st.session_state.results
     df = results["df"]
@@ -453,7 +458,7 @@ if 'results' in st.session_state:
             st.markdown(
                 """
                 This tool utilises a W' balance model based on the research by Alex Welburn, PhD. 
-                [Publication](https://link.springer.com/article/10.1007/s00421-025-05912-0) | [ResearchGate](https://www.researchgate.net/profile/Alex-Welburn) | [X (Twitter)](https://twitter.com/xx)
+                [Publication](https://link.springer.com/article/10.1007/s00421-025-05912-0) | [ResearchGate](https://www.researchgate.net/profile/Alex-Welburn) | [X (https://twitter.com/xx)
                 """
             )
         st.divider()
@@ -471,7 +476,7 @@ if 'results' in st.session_state:
                 weather = ride_info["weather"]
                 temp = weather.get('temperature')
                 if isinstance(temp, (int, float)):
-                    thermo_emoji = "🔥" if temp > 25 else "☀️" if temp > 18 else "⛅"
+                    thermo_emoji = "🔥 HOT" if temp > 25 else "☀️ Warm" if temp > 18 else "⛅"
                     st.metric(f"Temperature {thermo_emoji}", f"{temp}°C")
                 else:
                     st.metric("Temperature", "N/A")
@@ -501,7 +506,7 @@ if 'results' in st.session_state:
                 st.markdown(f"<p style='color:green; font-size: 0.9em; margin-top: -10px;'>{work_above_cp_per_kg_val} kJ/kg</p>", unsafe_allow_html=True)
         with c6: st.metric("Coasting", f"{metrics.get('coasting_percent', 'N/A')}%")
         st.divider()
-        st.header(f"Power Analysis (Threshold = {int(CP)} W)")
+        st.header(f"Power Analysis (CP Set= {int(CP)} W)")
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("##### Above CP")
