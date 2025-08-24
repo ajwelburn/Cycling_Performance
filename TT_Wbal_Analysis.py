@@ -251,10 +251,8 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
     current_match = None
     below_counter = 0
 
-    # --- NEW: Pre-calculate cumulative work metrics ---
     df['cumulative_work_kj'] = df['power'].cumsum() / 1000
     df['cumulative_work_above_cp_kj'] = (df['power'] - cp).clip(lower=0).cumsum() / 1000
-    # --- END NEW ---
 
     for i in range(len(df)):
         power = df['power'].iloc[i]
@@ -286,7 +284,6 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
         depletion_percent = (w_prime_depleted_joules / w_prime) * 100 if w_prime > 0 else 0
         start_index = match['start_index']
 
-        # --- UPDATED: Add new context fields to each match ---
         match_data.append({
             "Start Time (s)": df['time'].iloc[start_index],
             "Start Distance (km)": df['distance'].iloc[start_index] / 1000,
@@ -295,11 +292,12 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
             "Avg Power (W/kg)": avg_power_wkg,
             "Magnitude (%CP)": magnitude,
             "Depletion (% W')": depletion_percent,
-            "Depletion (kJ)": w_prime_depleted_joules / 1000,
+            # --- ✅ FIX APPLIED HERE: Corrected the key name ---
+            "W' Depleted (kJ)": w_prime_depleted_joules / 1000,
+            # --- END FIX ---
             "Total Work Before (kJ)": df['cumulative_work_kj'].iloc[start_index],
             "Work > CP Before (kJ)": df['cumulative_work_above_cp_kj'].iloc[start_index]
         })
-        # --- END UPDATE ---
 
     summary = {
         "Total Matches": len(match_data),
@@ -688,11 +686,10 @@ if 'results' in st.session_state:
         st.markdown("This table highlights the efforts that consumed the most `W'`, pinpointing the most anaerobically demanding moments of the ride.")
         num_efforts = st.slider("Number of top efforts to display:", min_value=2, max_value=20, value=5)
         if not matches_df.empty:
-            top_efforts_df = matches_df.sort_values(by="Depletion (kJ)", ascending=False).head(num_efforts)
+            top_efforts_df = matches_df.sort_values(by="W' Depleted (kJ)", ascending=False).head(num_efforts)
             display_df = top_efforts_df.copy()
             display_df.insert(0, 'Effort #', range(1, 1 + len(display_df)))
 
-            # --- UPDATED: Add new columns and formatting for the display table ---
             display_df['Time'] = pd.to_datetime(display_df['Start Time (s)'], unit='s').dt.strftime('%H:%M:%S')
             display_df['Duration'] = display_df['Duration (s)'].apply(format_seconds_to_ms)
             
@@ -702,8 +699,7 @@ if 'results' in st.session_state:
             ]].rename(columns={
                 'Start Distance (km)': 'Distance (km)',
                 'Avg Power (W)': 'Avg Power', 
-                'Avg Power (W/kg)': 'Avg W/kg', 
-                "W' Depleted (kJ)": "W' Depleted (kJ)"
+                'Avg Power (W/kg)': 'Avg W/kg'
             })
             
             st.dataframe(final_display_df.style.format({
@@ -714,13 +710,12 @@ if 'results' in st.session_state:
                 'Total Work Before (kJ)': '{:.0f}',
                 'Work > CP Before (kJ)': '{:.0f}'
             }).background_gradient(cmap='Reds', subset=["W' Depleted (kJ)"]).background_gradient(cmap='viridis', subset=["Avg Power"]).set_properties(**{'text-align': 'left'}), use_container_width=True, hide_index=True)
-            # --- END UPDATE ---
             
             st.subheader("Top Efforts Chart")
             chart_df = top_efforts_df.copy()
             chart_df['Effort'] = [f"Effort #{i+1}" for i in range(len(chart_df))]
             fig_top_efforts = make_subplots(specs=[[{"secondary_y": True}]])
-            fig_top_efforts.add_trace(go.Bar(x=chart_df['Effort'], y=chart_df['Depletion (kJ)'], name="W' Depleted (kJ)", marker_color='indianred', hovertemplate='<b>%{x}</b><br>W\' Depleted: %{y:.2f} kJ<br>Avg Power: %{customdata[0]:.0f} W<br>Avg Power (W/kg): %{customdata[1]:.2f}<br>Duration: %{customdata[2]}s<br><extra></extra>', customdata=chart_df[['Avg Power (W)', 'Avg Power (W/kg)', 'Duration (s)']]), secondary_y=False)
+            fig_top_efforts.add_trace(go.Bar(x=chart_df['Effort'], y=chart_df["W' Depleted (kJ)"], name="W' Depleted (kJ)", marker_color='indianred', hovertemplate='<b>%{x}</b><br>W\' Depleted: %{y:.2f} kJ<br>Avg Power: %{customdata[0]:.0f} W<br>Avg Power (W/kg): %{customdata[1]:.2f}<br>Duration: %{customdata[2]}s<br><extra></extra>', customdata=chart_df[['Avg Power (W)', 'Avg Power (W/kg)', 'Duration (s)']]), secondary_y=False)
             fig_top_efforts.add_trace(go.Scatter(x=chart_df['Effort'], y=chart_df['Avg Power (W)'], name='Avg Power (W)', mode='lines+markers', line=dict(color='royalblue', dash='dash')), secondary_y=True)
             fig_top_efforts.update_layout(title_text="Top W' Depleting Efforts Analysis", template='plotly_white', barmode='group', legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5))
             fig_top_efforts.update_yaxes(title_text="<b>W' Depleted (kJ)</b>", secondary_y=False)
@@ -756,18 +751,15 @@ if 'results' in st.session_state:
         
         st.divider()
 
-        # --- NEW: W'Bal vs Elevation by Distance with Gradient Coloring ---
         if 'distance' in df.columns and df['distance'].max() > 0 and 'altitude' in df.columns:
             st.subheader("W' Balance vs. Elevation by Distance")
             
-            # Calculate gradient
             delta_alt = df['altitude'].diff()
             delta_dist = df['distance'].diff()
             with np.errstate(divide='ignore', invalid='ignore'):
                 gradient = np.true_divide(delta_alt, delta_dist) * 100
             df['gradient'] = gradient.fillna(0)
 
-            # Define color mapping function based on gradient
             def get_gradient_color(g):
                 if g > 12: return 'darkred'    # HC
                 elif g >= 9: return 'red'      # Cat 1
@@ -779,13 +771,11 @@ if 'results' in st.session_state:
 
             fig_dist = make_subplots(specs=[[{"secondary_y": True}]])
             
-            # Add W'bal trace
             fig_dist.add_trace(
                 go.Scatter(x=df['distance']/1000, y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)),
                 secondary_y=False
             )
 
-            # Add segmented elevation profile colored by gradient
             df['color_change'] = df['gradient_color'].ne(df['gradient_color'].shift())
             segments = df['color_change'].cumsum()
             for i, segment_df in df.groupby(segments):
@@ -802,7 +792,6 @@ if 'results' in st.session_state:
                     secondary_y=True
                 )
             
-            # Add custom legend for gradient colors
             legend_colors = {'darkred': '>12% (HC)','red': '9-12% (Cat 1)','orange': '6-9% (Cat 2)','gold': '3-6% (Cat 3)','green': '<3% (Cat 4)'}
             for color, name in legend_colors.items():
                 fig_dist.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color=color, width=5), name=name), secondary_y=True)
@@ -816,7 +805,6 @@ if 'results' in st.session_state:
             fig_dist.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', secondary_y=False, range=yaxis_range)
             fig_dist.update_yaxes(title_text="Elevation (m)", showline=True, linewidth=2, linecolor='black', secondary_y=True)
             st.plotly_chart(fig_dist, use_container_width=True)
-        # --- END NEW ---
 
     with tabs[4]: # Power Profile
         st.header("Power Profile")
