@@ -28,7 +28,6 @@ SEMICIRCLES_TO_DEGREES = 180 / (2**31)
 # ==============================================================================
 # --- HELPER & ANALYSIS FUNCTIONS ---
 # ==============================================================================
-# Note: Caching is used to prevent re-running expensive functions on every interaction.
 @st.cache_data
 def parse_fit_file(fit_file_bytes: bytes) -> Tuple[pd.DataFrame, datetime]:
     """Parses a .fit file into a clean pandas DataFrame."""
@@ -86,6 +85,7 @@ def calculate_wbal(ride_df, critical_power, w_prime_joules, tau_a, tau_b):
     ride_df['wbal_percent'] = (ride_df['Wbal'] / w_prime_joules) * 100
     return ride_df
 
+@st.cache_data
 def get_ride_summary_metrics(ride_df, critical_power, rider_weight_kg):
     """Calculates a dictionary of summary metrics from the ride data."""
     metrics = {}
@@ -111,6 +111,20 @@ def get_ride_summary_metrics(ride_df, critical_power, rider_weight_kg):
     metrics['avg_speed_overall'] = ride_df['speed_kmh'].mean() if 'speed_kmh' in ride_df else 0
     metrics['total_distance'] = ride_df['distance'].max() / 1000 if 'distance' in ride_df else 0
     return metrics
+
+@st.cache_data
+def calculate_mmp_curve(power_series: pd.Series) -> pd.DataFrame:
+    """Correctly calculates the Mean Maximal Power (MMP) curve."""
+    mmp_data = []
+    # Use a limited set of durations for performance
+    durations = sorted(list(set(np.logspace(0, np.log10(len(power_series)), 100).astype(int))))
+    
+    for d in durations:
+        if d > 0:
+            max_power = power_series.rolling(window=d).mean().max()
+            mmp_data.append({'duration': d, 'mmp': max_power})
+    
+    return pd.DataFrame(mmp_data)
 
 def format_seconds(seconds: float, mode='hms') -> str:
     """Formats seconds into H:M:S or M:S strings."""
@@ -257,8 +271,7 @@ if 'analysis_results' in st.session_state:
     # --- TAB 3: POWER PROFILE ---
     with power_tab:
         st.header("Mean Maximal Power (MMP)")
-        mmp_df = ride_data['power'].rolling(window=3600, min_periods=1).mean().reset_index(name='mmp')
-        mmp_df['duration'] = mmp_df.index + 1
+        mmp_df = calculate_mmp_curve(ride_data['power'])
         
         mmp_fig = go.Figure(go.Scatter(x=mmp_df['duration'], y=mmp_df['mmp'], mode='lines'))
         mmp_fig.update_layout(title_text='Mean Maximal Power (MMP) Curve', template='plotly_white', xaxis_type="log",
