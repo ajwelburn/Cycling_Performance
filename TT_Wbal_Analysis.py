@@ -78,12 +78,8 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     else:
         st.warning("Could not find a reliable start time. Using elapsed time from the start of data.")
         df['time'] = (df['timestamp'] - df['timestamp'].iloc[0]).dt.total_seconds()
-
-    # --- ✅ FIX APPLIED HERE ---
-    # Convert seconds to datetime objects. Plotly will format these as HH:MM:SS
-    # and Streamlit can correctly serialize them to JSON.
+    
     df['time_hms'] = pd.to_datetime(df['time'], unit='s')
-    # --- END FIX ---
 
     if 'position_lat' in df.columns and df['position_lat'].notnull().any():
         df['position_lat'] = df['position_lat'] * SEMICIRCLES_TO_DEGREES
@@ -255,6 +251,11 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
     current_match = None
     below_counter = 0
 
+    # --- NEW: Pre-calculate cumulative work metrics ---
+    df['cumulative_work_kj'] = df['power'].cumsum() / 1000
+    df['cumulative_work_above_cp_kj'] = (df['power'] - cp).clip(lower=0).cumsum() / 1000
+    # --- END NEW ---
+
     for i in range(len(df)):
         power = df['power'].iloc[i]
         
@@ -285,6 +286,7 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
         depletion_percent = (w_prime_depleted_joules / w_prime) * 100 if w_prime > 0 else 0
         start_index = match['start_index']
 
+        # --- UPDATED: Add new context fields to each match ---
         match_data.append({
             "Start Time (s)": df['time'].iloc[start_index],
             "Start Distance (km)": df['distance'].iloc[start_index] / 1000,
@@ -293,8 +295,11 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
             "Avg Power (W/kg)": avg_power_wkg,
             "Magnitude (%CP)": magnitude,
             "Depletion (% W')": depletion_percent,
-            "Depletion (kJ)": w_prime_depleted_joules / 1000
+            "Depletion (kJ)": w_prime_depleted_joules / 1000,
+            "Total Work Before (kJ)": df['cumulative_work_kj'].iloc[start_index],
+            "Work > CP Before (kJ)": df['cumulative_work_above_cp_kj'].iloc[start_index]
         })
+        # --- END UPDATE ---
 
     summary = {
         "Total Matches": len(match_data),
@@ -658,7 +663,7 @@ if 'results' in st.session_state:
     with tabs[2]: # Match Analysis
         st.header("Match Analysis")
         gap_tolerance = st.slider("Gap Tolerance (s)", min_value=0, max_value=10, value=3, help="Allowable time below threshold before ending a 'match'.")
-        matches_df, matches_summary = calculate_matches(df, CP, WP, gap_tolerance, weight)
+        matches_df, matches_summary = calculate_matches(df.copy(), CP, WP, gap_tolerance, weight) # Use a copy to avoid modifying original df
         col1, col2, col3 = st.columns(3)
         col1.metric("Total Matches Burned", f"{matches_summary['Total Matches']}")
         col2.metric("Avg Match Duration", f"{matches_summary['Avg Duration (s)']:.1f} s")
@@ -686,9 +691,31 @@ if 'results' in st.session_state:
             top_efforts_df = matches_df.sort_values(by="Depletion (kJ)", ascending=False).head(num_efforts)
             display_df = top_efforts_df.copy()
             display_df.insert(0, 'Effort #', range(1, 1 + len(display_df)))
+
+            # --- UPDATED: Add new columns and formatting for the display table ---
+            display_df['Time'] = pd.to_datetime(display_df['Start Time (s)'], unit='s').dt.strftime('%H:%M:%S')
             display_df['Duration'] = display_df['Duration (s)'].apply(format_seconds_to_ms)
-            final_display_df = display_df[['Effort #', 'Duration', 'Avg Power (W)', 'Avg Power (W/kg)', 'Magnitude (%CP)', 'Depletion (kJ)']].rename(columns={'Avg Power (W)': 'Avg Power', 'Avg Power (W/kg)': 'Avg W/kg', 'Magnitude (%CP)': 'Magnitude', 'Depletion (kJ)': "W' Depleted (kJ)"})
-            st.dataframe(final_display_df.style.format({'Avg Power': '{:.0f}', 'Avg W/kg': '{:.2f}', 'Magnitude': '{:.0f}%', "W' Depleted (kJ)": '{:.2f}'}).background_gradient(cmap='Reds', subset=["W' Depleted (kJ)"]).background_gradient(cmap='viridis', subset=["Avg Power"]).set_properties(**{'text-align': 'left'}), use_container_width=True, hide_index=True)
+            
+            final_display_df = display_df[[
+                'Effort #', 'Time', 'Start Distance (km)', 'Duration', 'Avg Power (W)', 
+                'Avg Power (W/kg)', "W' Depleted (kJ)", 'Total Work Before (kJ)', 'Work > CP Before (kJ)'
+            ]].rename(columns={
+                'Start Distance (km)': 'Distance (km)',
+                'Avg Power (W)': 'Avg Power', 
+                'Avg Power (W/kg)': 'Avg W/kg', 
+                "W' Depleted (kJ)": "W' Depleted (kJ)"
+            })
+            
+            st.dataframe(final_display_df.style.format({
+                'Distance (km)': '{:.2f}',
+                'Avg Power': '{:.0f}', 
+                'Avg W/kg': '{:.2f}', 
+                "W' Depleted (kJ)": '{:.2f}',
+                'Total Work Before (kJ)': '{:.0f}',
+                'Work > CP Before (kJ)': '{:.0f}'
+            }).background_gradient(cmap='Reds', subset=["W' Depleted (kJ)"]).background_gradient(cmap='viridis', subset=["Avg Power"]).set_properties(**{'text-align': 'left'}), use_container_width=True, hide_index=True)
+            # --- END UPDATE ---
+            
             st.subheader("Top Efforts Chart")
             chart_df = top_efforts_df.copy()
             chart_df['Effort'] = [f"Effort #{i+1}" for i in range(len(chart_df))]
@@ -713,7 +740,7 @@ if 'results' in st.session_state:
         min_wbal = df['wbal_kj'].min()
         yaxis_range = [min(0, min_wbal), (WP/1000) * 1.05]
 
-        fig_wbal.update_layout(title_text='W\' Balance vs. Elevation', template='plotly_white', font=dict(color="black"))
+        fig_wbal.update_layout(title_text='W\' Balance vs. Elevation by Time', template='plotly_white', font=dict(color="black"))
         fig_wbal.update_xaxes(title_text="Time (HH:MM:SS)", showline=True, linewidth=2, linecolor='black', mirror=False, tickformat='%H:%M:%S')
         fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, title_text="W'bal (kJ)", secondary_y=False, range=yaxis_range)
         fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, title_text="Elevation (m)", secondary_y=True)
@@ -726,6 +753,70 @@ if 'results' in st.session_state:
         fig_power.update_xaxes(title_text="Time (HH:MM:SS)", showline=True, linewidth=2, linecolor='black', mirror=False, tickformat='%H:%M:%S')
         fig_power.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False)
         st.plotly_chart(fig_power, use_container_width=True)
+        
+        st.divider()
+
+        # --- NEW: W'Bal vs Elevation by Distance with Gradient Coloring ---
+        if 'distance' in df.columns and df['distance'].max() > 0 and 'altitude' in df.columns:
+            st.subheader("W' Balance vs. Elevation by Distance")
+            
+            # Calculate gradient
+            delta_alt = df['altitude'].diff()
+            delta_dist = df['distance'].diff()
+            with np.errstate(divide='ignore', invalid='ignore'):
+                gradient = np.true_divide(delta_alt, delta_dist) * 100
+            df['gradient'] = gradient.fillna(0)
+
+            # Define color mapping function based on gradient
+            def get_gradient_color(g):
+                if g > 12: return 'darkred'    # HC
+                elif g >= 9: return 'red'      # Cat 1
+                elif g >= 6: return 'orange'   # Cat 2
+                elif g >= 3: return 'gold'     # Cat 3
+                else: return 'green'           # Cat 4 & Descents
+            
+            df['gradient_color'] = df['gradient'].apply(get_gradient_color)
+
+            fig_dist = make_subplots(specs=[[{"secondary_y": True}]])
+            
+            # Add W'bal trace
+            fig_dist.add_trace(
+                go.Scatter(x=df['distance']/1000, y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)),
+                secondary_y=False
+            )
+
+            # Add segmented elevation profile colored by gradient
+            df['color_change'] = df['gradient_color'].ne(df['gradient_color'].shift())
+            segments = df['color_change'].cumsum()
+            for i, segment_df in df.groupby(segments):
+                color = segment_df['gradient_color'].iloc[0]
+                fig_dist.add_trace(
+                    go.Scatter(
+                        x=segment_df['distance']/1000,
+                        y=segment_df['altitude'],
+                        mode='lines',
+                        line=dict(color=color, width=4),
+                        showlegend=False,
+                        hoverinfo='skip'
+                    ),
+                    secondary_y=True
+                )
+            
+            # Add custom legend for gradient colors
+            legend_colors = {'darkred': '>12% (HC)','red': '9-12% (Cat 1)','orange': '6-9% (Cat 2)','gold': '3-6% (Cat 3)','green': '<3% (Cat 4)'}
+            for color, name in legend_colors.items():
+                fig_dist.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color=color, width=5), name=name), secondary_y=True)
+
+            fig_dist.update_layout(
+                title_text="W' Balance vs. Gradient-Colored Elevation",
+                template='plotly_white', font=dict(color="black"),
+                legend=dict(title="Gradient")
+            )
+            fig_dist.update_xaxes(title_text="Distance (km)", showline=True, linewidth=2, linecolor='black')
+            fig_dist.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', secondary_y=False, range=yaxis_range)
+            fig_dist.update_yaxes(title_text="Elevation (m)", showline=True, linewidth=2, linecolor='black', secondary_y=True)
+            st.plotly_chart(fig_dist, use_container_width=True)
+        # --- END NEW ---
 
     with tabs[4]: # Power Profile
         st.header("Power Profile")
@@ -862,11 +953,9 @@ if 'results' in st.session_state:
             df2_aligned = df2.iloc[start_idx2:].copy()
             df1_aligned['time'] = df1_aligned['time'] - df1_aligned['time'].iloc[0]
             df2_aligned['time'] = df2_aligned['time'] - df2_aligned['time'].iloc[0]
-
-             #FIX APPLIED HERE
+            
             df1_aligned['time_hms'] = pd.to_datetime(df1_aligned['time'], unit='s')
             df2_aligned['time_hms'] = pd.to_datetime(df2_aligned['time'], unit='s')
-            # --- END FIX ---
 
             comp_cols = st.columns(2)
             with comp_cols[0]:
