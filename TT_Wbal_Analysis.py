@@ -21,12 +21,7 @@ st.set_page_config(
     page_icon="🚴",
     layout="wide"
 )
-
-# --- Constants ---
 SEMICIRCLES_TO_DEGREES = 180 / (2**31)
-
-# --- 1. ANALYSIS FUNCTIONS (Cached for performance) ---
-
 @st.cache_data
 def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     """
@@ -35,7 +30,6 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     records = []
     session_start_time = None
     first_record_time = None
-
     try:
         with io.BytesIO(file_content) as fit_file:
             with fitdecode.FitReader(fit_file) as fit:
@@ -63,11 +57,9 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     except fitdecode.FitDecodeError as e:
         st.error(f"Error decoding .fit file: {e}")
         return pd.DataFrame(), 0, None
-
     if not records:
         st.warning("The selected .fit file contains no data records.")
         return pd.DataFrame(), 0, None
-
     start_time = session_start_time or first_record_time
     df = pd.DataFrame(records)
     
@@ -80,28 +72,23 @@ def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
         df['time'] = (df['timestamp'] - df['timestamp'].iloc[0]).dt.total_seconds()
     
     df['time_hms'] = pd.to_datetime(df['time'], unit='s')
-
     if 'position_lat' in df.columns and df['position_lat'].notnull().any():
         df['position_lat'] = df['position_lat'] * SEMICIRCLES_TO_DEGREES
     if 'position_long' in df.columns and df['position_long'].notnull().any():
         df['position_long'] = df['position_long'] * SEMICIRCLES_TO_DEGREES
-
     missing_power_count = df['power'].isnull().sum()
     if missing_power_count > 0:
         st.warning(f"Note: Found and replaced {missing_power_count} missing power data point(s) with 0.")
     df['power'] = df['power'].fillna(0)
-
     for col in ['power', 'cadence', 'heart_rate', 'speed', 'distance', 'temperature']:
         if col not in df.columns: df[col] = np.nan
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-
     if 'altitude' in df.columns: df['altitude'] = df['altitude'].fillna(method='ffill')
     if 'speed' in df.columns:
         df['speed_kmh'] = df['speed'] * 3.6
         df['speed_kmh'] = df['speed_kmh'].rolling(3, min_periods=1).mean()
     if 'distance' in df.columns:
         df['distance'] = df['distance'].cummax()
-
     return df, missing_power_count, start_time
 
 @st.cache_data
@@ -233,16 +220,13 @@ def analyze_bouts(df: pd.DataFrame, bouts: List[Dict], bout_type: str, cp: int) 
             "Avg Cadence (rpm)": avg_cadence,
             "W' Change (kJ)": round(wbal_change / 1000, 2)
         }
-        
         if bout_type == "Effort":
             bout_summary["Avg Power > CP (W)"] = round(bout_df['power'].mean() - cp)
         else: # Recovery
             bout_summary["Avg Power < CP (W)"] = round(cp - bout_df['power'].mean())
-
         summary.append(bout_summary)
-        
+    
     return pd.DataFrame(summary)
-
 @st.cache_data
 def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: int, weight: float) -> Tuple[pd.DataFrame, Dict]:
     """Identifies and analyzes 'matches' burned above a threshold."""
@@ -304,7 +288,6 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
     }
     
     return pd.DataFrame(match_data), summary
-
 @st.cache_data
 def find_w_depletion_bouts(df: pd.DataFrame, w_prime: float, depletion_threshold_percent: int, max_duration_s: int, recovery_tolerance_s: int) -> List[Dict]:
     """Identifies all efforts that deplete W' by a given percentage within a max duration, allowing for short recoveries."""
@@ -336,13 +319,11 @@ def find_w_depletion_bouts(df: pd.DataFrame, w_prime: float, depletion_threshold
                         bouts.append({'start': bout_start_index, 'end': bout_end_index, 'depletion': depletion_percent})
                 recovery_counter = 0
     return bouts
-
 def get_time_of_day(hour: int) -> str:
     """Categorizes the hour into Morning, Afternoon, or Evening."""
     if 5 <= hour < 12: return "Morning"
     elif 12 <= hour < 18: return "Afternoon"
     else: return "Evening"
-    
 def format_seconds_to_hms(seconds: float) -> str:
     """Converts seconds into a 'Xh Ym Zs' format."""
     seconds = round(seconds)
@@ -350,7 +331,6 @@ def format_seconds_to_hms(seconds: float) -> str:
     minutes = int((seconds % 3600) // 60)
     remaining_seconds = int(seconds % 60)
     return f"{hours}h {minutes:02d}m {remaining_seconds:02d}s"
-
 def format_seconds_to_ms(seconds: float) -> str:
     """Converts seconds into a 'Xm Ys' format."""
     seconds = round(seconds)
@@ -358,11 +338,8 @@ def format_seconds_to_ms(seconds: float) -> str:
     remaining_seconds = int(seconds % 60)
     return f"{minutes}m {remaining_seconds:02d}s"
 
-# --- Main App Interface ---
 st.title("🚴 W' Bal: TT and Race Analysis Tool")
 st.markdown("Upload a `.fit` file and set your parameters to generate a detailed performance analysis.")
-
-# --- Sidebar for Inputs ---
 with st.sidebar:
     st.header("1. Upload Activity File")
     uploaded_file = st.file_uploader("Choose a .fit file", type="fit")
@@ -375,46 +352,35 @@ with st.sidebar:
     st.caption("*This is for the W'bal model*")
     A = st.number_input('Parameter A', value=5187, step=1)
     B = st.number_input('Parameter B', value=-0.70, format="%.2f")
-
     st.header("3. Manual Start Time (Optional)")
     manual_time_override = st.checkbox("Manually set start time")
     manual_date, manual_time = None, None
     if manual_time_override:
         manual_date = st.date_input("Select ride date", value=datetime.now())
         manual_time = st.time_input("Select ride start time", value=datetime.now().time())
-    
     with st.expander("🧪 Ride Comparison"):
         uploaded_file_2 = st.file_uploader("Choose a second .fit file to compare", type="fit")
-
     analyze_button = st.button("Analyze Ride", type="primary")
-
-# --- State Management ---
 if 'current_file' not in st.session_state:
     st.session_state.current_file = None
-
 if uploaded_file and uploaded_file.name != st.session_state.current_file:
     st.session_state.current_file = uploaded_file.name
     if 'results' in st.session_state:
         del st.session_state['results']
-
-# --- Main Panel Logic ---
 if analyze_button:
     if uploaded_file:
         WP = WP_kJ * 1000
         file_content = uploaded_file.getvalue()
         df, missing_power_count, parsed_start_time = parse_fit_file(file_content)
-
         start_time = parsed_start_time
         if manual_time_override:
             start_time = datetime.combine(manual_date, manual_time)
             st.info(f"Using manual start time: {start_time.strftime('%d %b %Y, %H:%M')}")
-
         if df.empty:
             st.error("Could not parse the .fit file. It might be empty or corrupted.")
             if 'results' in st.session_state: del st.session_state['results']
         else:
             with st.spinner("Analyzing..."):
-                # --- W'bal CALCULATION (on raw data)---
                 Wbal, Wbal_old = float(WP), float(WP)
                 wbal_list = [float(WP)]
                 power_np = df['power'].to_numpy()
@@ -431,8 +397,6 @@ if analyze_button:
                     Wbal_old = Wbal
                 df['Wbal'] = wbal_list
                 df['wbal_percent'] = (df['Wbal'] / WP) * 100
-
-                # --- VECTORIZED POWER AND CADENCE ANALYSIS ---
                 metrics = {}
                 df['state'] = np.where(df['power'] > CP, 'above', 'below')
                 metrics["total_work_kj"] = round(df['power'].sum() / 1000)
@@ -464,17 +428,14 @@ if analyze_button:
                 metrics["coasting_percent"] = round((metrics["coasting_time"] / len(df)) * 100) if len(df) > 0 else 0
                 metrics["avg_speed_overall"] = round(df['speed_kmh'].mean(), 1) if 'speed_kmh' in df.columns else 0
                 metrics["total_distance"] = round(df['distance'].max() / 1000, 2) if 'distance' in df.columns else 0
-                
                 power_zones_df = calculate_power_zones(df['power'], CP)
                 wbal_zones_df = calculate_wbal_zones(df['wbal_percent'])
                 mmp_df = calculate_mmp_curve(df['power'], weight)
                 top_above_bouts, top_below_bouts = find_top_bouts(df, CP)
                 above_bouts_summary = analyze_bouts(df, top_above_bouts, "Effort", CP)
                 below_bouts_summary = analyze_bouts(df, top_below_bouts, "Recovery", CP)
-                
                 first_coord = df[['position_lat', 'position_long']].dropna().iloc[0] if not df[['position_lat', 'position_long']].dropna().empty else None
                 weather_data = get_weather_data(first_coord['position_lat'], first_coord['position_long'], start_time) if first_coord is not None else None
-
                 st.session_state.results = {
                     "df": df, "metrics": metrics,
                     "power_profile": {"zones": power_zones_df, "mmp": mmp_df},
@@ -483,7 +444,6 @@ if analyze_button:
                     "params": {"CP": CP, "WP": WP, "Weight": weight},
                     "ride_info": {"start_time": start_time, "weather": weather_data}
                 }
-                
                 if uploaded_file_2:
                     file_content_2 = uploaded_file_2.getvalue()
                     df2, _, _ = parse_fit_file(file_content_2)
@@ -491,8 +451,6 @@ if analyze_button:
                         st.session_state.results["df2"] = df2
     else:
         st.warning("Please upload a .fit file first.")
-
-# Display results if they exist in the session state
 if 'results' in st.session_state:
     results = st.session_state.results
     df = results["df"]
@@ -503,10 +461,8 @@ if 'results' in st.session_state:
     interval_analysis = results["interval_analysis"]
     CP, WP, weight = params["CP"], params["WP"], params["Weight"]
     df['wbal_kj'] = df['Wbal'] / 1000
-
     tab_list = ["📊 Summary", "🏃 Interval Analysis", "🔥 Match Analysis", "📈 Ride Profile", "⚡ Power Profile", "🗺️ Route Maps", "⚙️ Data Explorer", "📋 Raw Data Explorer", "🧪 Beta Features"]
     tabs = st.tabs(tab_list)
-
     with tabs[0]: # Summary
         st.header("Ride Summary")
         st.subheader("About the Model")
@@ -515,7 +471,7 @@ if 'results' in st.session_state:
         with col2:
             st.markdown(
                 """
-                This tool utilizes a W' balance model based on the research by Alex Welburn, PhD. 
+                This tool utilises a W' balance model based on the research by Alex Welburn, PhD. 
                 [Publication](https://link.springer.com/article/10.1007/s00421-025-05912-0) | [ResearchGate](https://www.researchgate.net/profile/Alex-Welburn) | [X (Twitter)](https://twitter.com/xx)
                 """
             )
@@ -576,11 +532,9 @@ if 'results' in st.session_state:
             st.metric("Total Time", format_seconds_to_hms(metrics.get('total_time_below', 0)))
             st.metric("Avg Power", f"{metrics.get('avg_power_below', 'N/A')} W")
             st.metric("Number of Bouts", f"{metrics.get('bouts_below', 'N/A')}")
-
     with tabs[1]: # Interval Analysis
         st.header("Interval Analysis")
         st.subheader("Top Bouts vs. Power and W'bal")
-
         smooth_power = st.checkbox("Smooth Power Data", value=True, help="Apply a rolling average to the power data to reduce noise.")
         smoothing_window = 3
         if smooth_power:
@@ -588,27 +542,22 @@ if 'results' in st.session_state:
             power_to_plot = df['power'].rolling(window=smoothing_window, min_periods=1).mean()
         else:
             power_to_plot = df['power']
-        
         fig_intervals = make_subplots(specs=[[{"secondary_y": True}]])
         fig_intervals.add_trace(go.Scatter(x=df['time_hms'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=False)
         fig_intervals.add_trace(go.Scatter(x=df['time_hms'], y=power_to_plot, name='Power', line=dict(color='grey', width=1)), secondary_y=True)
         fig_intervals.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(color='rgba(214, 39, 40, 0.4)'), name='Top Effort'))
         fig_intervals.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(color='rgba(31, 119, 180, 0.4)'), name='Top Recovery'))
-
         for bout in interval_analysis['above_bouts']:
             fig_intervals.add_vrect(x0=df['time_hms'].iloc[bout['start']], x1=df['time_hms'].iloc[bout['end']], fillcolor="red", opacity=0.2, layer="below", line_width=0)
         for bout in interval_analysis['below_bouts']:
             fig_intervals.add_vrect(x0=df['time_hms'].iloc[bout['start']], x1=df['time_hms'].iloc[bout['end']], fillcolor="blue", opacity=0.2, layer="below", line_width=0)
-
         min_wbal = df['wbal_kj'].min()
         yaxis_range = [min(0, min_wbal), (WP/1000) * 1.05]
-
         fig_intervals.update_layout(template='plotly_white', font=dict(color="black"), showlegend=True)
         fig_intervals.update_xaxes(title_text="Time (HH:MM:SS)", showline=True, linewidth=2, linecolor='black', mirror=False, tickformat='%H:%M:%S')
         fig_intervals.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False, range=yaxis_range)
         fig_intervals.update_yaxes(title_text="Power (W)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
         st.plotly_chart(fig_intervals, use_container_width=True)
-        
         st.subheader("W' Balance as a Percentage")
         fig_wbal_percent = go.Figure()
         fig_wbal_percent.add_trace(go.Scatter(x=df['time_hms'], y=df['wbal_percent'], name='W\'bal (%)', line=dict(color='purple', width=2)))
@@ -622,7 +571,6 @@ if 'results' in st.session_state:
         fig_wbal_percent.update_xaxes(title_text="Time (HH:MM:SS)", showline=True, linewidth=2, linecolor='black', mirror=False, tickformat='%H:%M:%S')
         fig_wbal_percent.update_yaxes(title_text="W'bal (%)", showline=True, linewidth=2, linecolor='black', mirror=False)
         st.plotly_chart(fig_wbal_percent, use_container_width=True)
-
         st.subheader("Time in W'bal Zones")
         wbal_zones_df = results["wbal_zones"]
         wbal_zones_df['Time (HMS)'] = wbal_zones_df['Time (s)'].apply(format_seconds_to_hms)
@@ -637,7 +585,6 @@ if 'results' in st.session_state:
         st.dataframe(interval_analysis['above_summary'])
         st.dataframe(interval_analysis['below_summary'])
         st.divider()
-
         st.subheader("W' Depletion Analysis")
         col1, col2, col3 = st.columns(3)
         with col1: depletion_threshold = st.slider("Highlight efforts that deplete W' by at least:", 20, 90, 40, format="%d%%")
@@ -650,13 +597,11 @@ if 'results' in st.session_state:
         fig_depletion.add_trace(go.Scatter(x=df['time_hms'], y=df['power'], name='Power', line=dict(color='grey', width=1)), secondary_y=True)
         for bout in depletion_bouts:
             fig_depletion.add_vrect(x0=df['time_hms'].iloc[bout['start']], x1=df['time_hms'].iloc[bout['end']], fillcolor="rgba(255, 165, 0, 0.3)", layer="below", line_width=0)
-        
         fig_depletion.update_layout(title_text=f"Efforts Depleting W' > {depletion_threshold}%", template='plotly_white', font=dict(color="black"), showlegend=True)
         fig_depletion.update_xaxes(title_text="Time (HH:MM:SS)", showline=True, linewidth=2, linecolor='black', mirror=False, tickformat='%H:%M:%S')
         fig_depletion.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False, range=yaxis_range)
         fig_depletion.update_yaxes(title_text="Power (W)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
         st.plotly_chart(fig_depletion, use_container_width=True)
-
     with tabs[2]: # Match Analysis
         st.header("Match Analysis")
         gap_tolerance = st.slider("Gap Tolerance (s)", min_value=0, max_value=10, value=3, help="Allowable time below threshold before ending a 'match'.")
@@ -688,10 +633,8 @@ if 'results' in st.session_state:
             top_efforts_df = matches_df.sort_values(by="W' Depleted (kJ)", ascending=False).head(num_efforts)
             display_df = top_efforts_df.copy()
             display_df.insert(0, 'Effort #', range(1, 1 + len(display_df)))
-
             display_df['Time'] = pd.to_datetime(display_df['Start Time (s)'], unit='s').dt.strftime('%H:%M:%S')
             display_df['Duration'] = display_df['Duration (s)'].apply(format_seconds_to_ms)
-            
             final_display_df = display_df[[
                 'Effort #', 'Time', 'Start Distance (km)', 'Duration', 'Avg Power (W)', 
                 'Avg Power (W/kg)', "W' Depleted (kJ)", 'Total Work Before (kJ)', 'Work > CP Before (kJ)'
@@ -700,7 +643,6 @@ if 'results' in st.session_state:
                 'Avg Power (W)': 'Avg Power', 
                 'Avg Power (W/kg)': 'Avg W/kg'
             })
-            
             st.dataframe(final_display_df.style.format({
                 'Distance (km)': '{:.2f}',
                 'Avg Power': '{:.0f}', 
@@ -709,7 +651,6 @@ if 'results' in st.session_state:
                 'Total Work Before (kJ)': '{:.0f}',
                 'Work > CP Before (kJ)': '{:.0f}'
             }).background_gradient(cmap='Reds', subset=["W' Depleted (kJ)"]).background_gradient(cmap='viridis', subset=["Avg Power"]).set_properties(**{'text-align': 'left'}), use_container_width=True, hide_index=True)
-            
             st.subheader("Top Efforts Chart")
             chart_df = top_efforts_df.copy()
             chart_df['Effort'] = [f"Effort #{i+1}" for i in range(len(chart_df))]
@@ -722,24 +663,20 @@ if 'results' in st.session_state:
             fig_top_efforts.update_xaxes(title_text="Effort")
             st.plotly_chart(fig_top_efforts, use_container_width=True)
         else:
-            st.info("No matches were found in this ride to analyze.")
-
+            st.info("No matches were found in this ride to analyse.")
     with tabs[3]: # Ride Profile
         st.header("Ride Profile Charts")
         fig_wbal = make_subplots(specs=[[{"secondary_y": True}]])
         fig_wbal.add_trace(go.Scatter(x=df['time_hms'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=False)
         if 'altitude' in df.columns and df['altitude'].notna().any():
             fig_wbal.add_trace(go.Scatter(x=df['time_hms'], y=df['altitude'], name='Elevation (m)', line=dict(color='#2ca02c', width=2), fill='tozeroy'), secondary_y=True)
-        
         min_wbal = df['wbal_kj'].min()
         yaxis_range = [min(0, min_wbal), (WP/1000) * 1.05]
-
         fig_wbal.update_layout(title_text='W\' Balance vs. Elevation by Time', template='plotly_white', font=dict(color="black"))
         fig_wbal.update_xaxes(title_text="Time (HH:MM:SS)", showline=True, linewidth=2, linecolor='black', mirror=False, tickformat='%H:%M:%S')
         fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, title_text="W'bal (kJ)", secondary_y=False, range=yaxis_range)
         fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, title_text="Elevation (m)", secondary_y=True)
         st.plotly_chart(fig_wbal, use_container_width=True)
-        
         fig_power = go.Figure()
         fig_power.add_trace(go.Scatter(x=df['time_hms'], y=df['power'], name='Power', line=dict(color='cyan', width=1)))
         fig_power.add_shape(type="line", x0=df['time_hms'].min(), y0=CP, x1=df['time_hms'].max(), y1=CP, line=dict(color="#ff7f0e", width=2, dash="dash"), name=f"CP ({CP}W)")
@@ -752,13 +689,11 @@ if 'results' in st.session_state:
 
         if 'distance' in df.columns and df['distance'].max() > 0 and 'altitude' in df.columns:
             st.subheader("W' Balance vs. Elevation by Distance")
-            
             delta_alt = df['altitude'].diff()
             delta_dist = df['distance'].diff()
             with np.errstate(divide='ignore', invalid='ignore'):
                 gradient = np.true_divide(delta_alt, delta_dist) * 100
             df['gradient'] = gradient.fillna(0)
-
             def get_gradient_color(g):
                 if g > 12: return 'darkred'    # HC
                 elif g >= 9: return 'red'      # Cat 1
@@ -767,16 +702,12 @@ if 'results' in st.session_state:
                 else: return 'green'           # Cat 4 & Descents
             
             df['gradient_color'] = df['gradient'].apply(get_gradient_color)
-
             fig_dist = make_subplots(specs=[[{"secondary_y": True}]])
-            
+        
             fig_dist.add_trace(
                 go.Scatter(x=df['distance']/1000, y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)),
                 secondary_y=False
             )
-
-            # --- ✅ PLOT STYLE UPDATED HERE ---
-            # Group data by contiguous color segments to create distinct filled areas
             df['color_change'] = df['gradient_color'].ne(df['gradient_color'].shift())
             segments = df['color_change'].cumsum()
             for i, segment_df in df.groupby(segments):
@@ -793,12 +724,10 @@ if 'results' in st.session_state:
                     ),
                     secondary_y=True
                 )
-            # --- END UPDATE ---
             
             legend_colors = {'darkred': '>12% (HC)','red': '9-12% (Cat 1)','orange': '6-9% (Cat 2)','gold': '3-6% (Cat 3)','green': '<3% (Cat 4)'}
             for color, name in legend_colors.items():
                 fig_dist.add_trace(go.Scatter(x=[None], y=[None], mode='lines', line=dict(color=color, width=5), name=name), secondary_y=True)
-
             fig_dist.update_layout(
                 title_text="W' Balance vs. Gradient-Colored Elevation",
                 template='plotly_white', font=dict(color="black"),
@@ -808,7 +737,6 @@ if 'results' in st.session_state:
             fig_dist.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', secondary_y=False, range=yaxis_range)
             fig_dist.update_yaxes(title_text="Elevation (m)", showline=True, linewidth=2, linecolor='black', secondary_y=True)
             st.plotly_chart(fig_dist, use_container_width=True)
-
     with tabs[4]: # Power Profile
         st.header("Power Profile")
         zones_df = power_profile["zones"]
@@ -857,7 +785,6 @@ if 'results' in st.session_state:
             fig_mmp_wkg.update_xaxes(title_text='Duration (log scale)', showline=True, linewidth=2, linecolor='black', mirror=False)
             fig_mmp_wkg.update_yaxes(title_text='Max Power (W/kg)', showline=True, linewidth=2, linecolor='black', mirror=False)
             st.plotly_chart(fig_mmp_wkg, use_container_width=True)
-
     with tabs[5]: # Route Maps
         st.header("Route Maps")
         if 'position_lat' in df.columns and 'position_long' in df.columns and not df[['position_lat', 'position_long']].dropna().empty:
@@ -874,7 +801,6 @@ if 'results' in st.session_state:
             st_folium(m_wbal, width=1400, height=500)
         else:
             st.warning("No GPS data found in the file to generate maps.")
-
     with tabs[6]: # Data Explorer
         st.header("Interactive Data Explorer")
         available_metrics = ['Power', 'Speed (km/h)']
@@ -896,8 +822,7 @@ if 'results' in st.session_state:
             fig_explorer.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False)
             fig_explorer.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
             st.plotly_chart(fig_explorer, use_container_width=True)
-
-    with tabs[7]: # Raw Data Explorer
+    with tabs[7]: 
         st.header("Raw Data Explorer")
         cols_to_show = [col for col in ['power', 'cadence', 'heart_rate', 'altitude', 'speed_kmh', 'temperature'] if col in df.columns and df[col].notna().any()]
         num_cols = 3
@@ -909,7 +834,6 @@ if 'results' in st.session_state:
                     st.metric("Average", f"{df[col_name].mean():.1f}")
                     st.metric("Max", f"{df[col_name].max():.1f}")
                     st.metric("Min", f"{df[col_name].min():.1f}")
-
     with tabs[8]: # Beta Features
         st.header("🧪 Beta Features")
         st.warning("These features are experimental and may not be fully accurate. Use with caution.")
@@ -944,10 +868,8 @@ if 'results' in st.session_state:
             df2_aligned = df2.iloc[start_idx2:].copy()
             df1_aligned['time'] = df1_aligned['time'] - df1_aligned['time'].iloc[0]
             df2_aligned['time'] = df2_aligned['time'] - df2_aligned['time'].iloc[0]
-            
             df1_aligned['time_hms'] = pd.to_datetime(df1_aligned['time'], unit='s')
             df2_aligned['time_hms'] = pd.to_datetime(df2_aligned['time'], unit='s')
-
             comp_cols = st.columns(2)
             with comp_cols[0]:
                 st.markdown("#### Ride 1 (Primary)")
@@ -959,7 +881,6 @@ if 'results' in st.session_state:
                 st.metric("Avg Power", f"{round(df2_aligned['power'].mean())} W")
                 st.metric("Avg Speed", f"{df2_aligned['speed_kmh'].mean():.1f} km/h")
                 st.metric("Total Distance", f"{df2_aligned['distance'].max() / 1000:.2f} km")
-                
             fig_comp = go.Figure()
             fig_comp.add_trace(go.Scatter(x=df1_aligned['time_hms'], y=df1_aligned['power'], name='Ride 1 Power', line=dict(color='blue')))
             fig_comp.add_trace(go.Scatter(x=df2_aligned['time_hms'], y=df2_aligned['power'], name='Ride 2 Power', line=dict(color='red')))
