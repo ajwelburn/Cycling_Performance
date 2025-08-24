@@ -372,6 +372,7 @@ with st.sidebar:
     weight = st.number_input('Weight (kg)', value=75.0, min_value=30.0, max_value=200.0, step=0.5, format="%.1f")
     CP = st.number_input('Critical Power (CP) in Watts', value=350, step=1)
     WP_kJ = st.number_input('W\' (W prime) in kJ', value=20.0, step=1.0, format="%.1f")
+    st.caption("*This is for the W'bal model*")
     A = st.number_input('Parameter A', value=5187, step=1)
     B = st.number_input('Parameter B', value=-0.70, format="%.2f")
 
