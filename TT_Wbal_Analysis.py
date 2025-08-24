@@ -292,9 +292,7 @@ def calculate_matches(df: pd.DataFrame, cp: int, w_prime: float, gap_tolerance: 
             "Avg Power (W/kg)": avg_power_wkg,
             "Magnitude (%CP)": magnitude,
             "Depletion (% W')": depletion_percent,
-            # --- ✅ FIX APPLIED HERE: Corrected the key name ---
             "W' Depleted (kJ)": w_prime_depleted_joules / 1000,
-            # --- END FIX ---
             "Total Work Before (kJ)": df['cumulative_work_kj'].iloc[start_index],
             "Work > CP Before (kJ)": df['cumulative_work_above_cp_kj'].iloc[start_index]
         })
@@ -776,6 +774,8 @@ if 'results' in st.session_state:
                 secondary_y=False
             )
 
+            # --- ✅ PLOT STYLE UPDATED HERE ---
+            # Group data by contiguous color segments to create distinct filled areas
             df['color_change'] = df['gradient_color'].ne(df['gradient_color'].shift())
             segments = df['color_change'].cumsum()
             for i, segment_df in df.groupby(segments):
@@ -784,13 +784,15 @@ if 'results' in st.session_state:
                     go.Scatter(
                         x=segment_df['distance']/1000,
                         y=segment_df['altitude'],
-                        mode='lines',
-                        line=dict(color=color, width=4),
+                        mode='none', # Turn off lines and markers
+                        fill='tozeroy', # Fill the area down to the y=0 axis
+                        fillcolor=color, # Use the segment's gradient color
                         showlegend=False,
                         hoverinfo='skip'
                     ),
                     secondary_y=True
                 )
+            # --- END UPDATE ---
             
             legend_colors = {'darkred': '>12% (HC)','red': '9-12% (Cat 1)','orange': '6-9% (Cat 2)','gold': '3-6% (Cat 3)','green': '<3% (Cat 4)'}
             for color, name in legend_colors.items():
