@@ -10,7 +10,7 @@ from streamlit_folium import st_folium
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from typing import Tuple, List, Dict
-from datetime import datetime, time, date, timedelta
+from datetime import datetime, time, date
 import requests
 from folium.features import ColorLine
 import plotly.colors
@@ -31,8 +31,6 @@ SEMICIRCLES_TO_DEGREES = 180 / (2**31)
 def parse_fit_file(file_content: bytes) -> Tuple[pd.DataFrame, int, datetime]:
     """
     Parses the in-memory .fit file content into a pandas DataFrame.
-    (Corrected Version) - This version preserves the original timestamp and
-    creates a 'time' column for elapsed seconds, ensuring the ride date is never lost.
     """
     records = []
     session_start_time = None
@@ -590,9 +588,13 @@ if 'results' in st.session_state:
         for bout in interval_analysis['below_bouts']:
             fig_intervals.add_vrect(x0=df['time'].iloc[bout['start']], x1=df['time'].iloc[bout['end']], fillcolor="blue", opacity=0.2, layer="below", line_width=0)
 
+        # --- UPDATED: Set y-axis range for W'bal ---
+        min_wbal = df['wbal_kj'].min()
+        yaxis_range = [min(0, min_wbal), (WP/1000) * 1.05]
+
         fig_intervals.update_layout(template='plotly_white', font=dict(color="black"), showlegend=True)
         fig_intervals.update_xaxes(title_text="Time (HH:MM:SS)", showline=True, linewidth=2, linecolor='black', mirror=False, tickformat='%H:%M:%S')
-        fig_intervals.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False)
+        fig_intervals.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False, range=yaxis_range)
         fig_intervals.update_yaxes(title_text="Power (W)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
         st.plotly_chart(fig_intervals, use_container_width=True)
         
@@ -639,9 +641,11 @@ if 'results' in st.session_state:
         fig_depletion.add_trace(go.Scatter(x=df['time'], y=df['power'], name='Power', line=dict(color='grey', width=1)), secondary_y=True)
         for bout in depletion_bouts:
             fig_depletion.add_vrect(x0=df['time'].iloc[bout['start']], x1=df['time'].iloc[bout['end']], fillcolor="rgba(255, 165, 0, 0.3)", layer="below", line_width=0)
+        
+        # --- UPDATED: Set y-axis range for W'bal ---
         fig_depletion.update_layout(title_text=f"Efforts Depleting W' > {depletion_threshold}%", template='plotly_white', font=dict(color="black"), showlegend=True)
         fig_depletion.update_xaxes(title_text="Time (HH:MM:SS)", showline=True, linewidth=2, linecolor='black', mirror=False, tickformat='%H:%M:%S')
-        fig_depletion.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False)
+        fig_depletion.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=False, range=yaxis_range)
         fig_depletion.update_yaxes(title_text="Power (W)", showline=True, linewidth=2, linecolor='black', mirror=False, secondary_y=True)
         st.plotly_chart(fig_depletion, use_container_width=True)
 
@@ -700,9 +704,14 @@ if 'results' in st.session_state:
         fig_wbal.add_trace(go.Scatter(x=df['time'], y=df['wbal_kj'], name='W\'bal (kJ)', line=dict(color='#9467bd', width=2)), secondary_y=False)
         if 'altitude' in df.columns and df['altitude'].notna().any():
             fig_wbal.add_trace(go.Scatter(x=df['time'], y=df['altitude'], name='Elevation (m)', line=dict(color='#2ca02c', width=2), fill='tozeroy'), secondary_y=True)
+        
+        # --- UPDATED: Set y-axis range for W'bal ---
+        min_wbal = df['wbal_kj'].min()
+        yaxis_range = [min(0, min_wbal), (WP/1000) * 1.05]
+
         fig_wbal.update_layout(title_text='W\' Balance vs. Elevation', template='plotly_white', font=dict(color="black"))
         fig_wbal.update_xaxes(title_text="Time (HH:MM:SS)", showline=True, linewidth=2, linecolor='black', mirror=False, tickformat='%H:%M:%S')
-        fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, title_text="W'bal (kJ)", secondary_y=False)
+        fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, title_text="W'bal (kJ)", secondary_y=False, range=yaxis_range)
         fig_wbal.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=False, title_text="Elevation (m)", secondary_y=True)
         st.plotly_chart(fig_wbal, use_container_width=True)
         fig_power = go.Figure()
