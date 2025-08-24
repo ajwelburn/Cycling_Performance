@@ -881,4 +881,4 @@ elif not uploaded_file and analyze_button:
     st.warning("Please upload a .fit file first.")
 else:
     if 'results' not in st.session_state:
-        st.info("Welcome! Please upload a .fit file and click 'Analysee Ride' in the sidebar to begin, adjust the parameters on the left, some features my work, if there are any errors or issues let me know.")
+        st.info("Welcome! Please upload a .fit file and click 'Analysee Ride' in the sidebar to begin, adjust the parameters on the left, some features may work, if there are any errors or issues let me know.")
