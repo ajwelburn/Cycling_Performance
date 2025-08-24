@@ -148,18 +148,18 @@ def create_main_figure(title, y1_title, y2_title=None):
 with st.sidebar:
     st.header("1. Upload Activity")
     uploaded_fit_file = st.file_uploader("Choose a .fit file", type="fit")
-    
- st.header("2. Set Parameters")
-rider_weight_kg = st.number_input(
-    'Weight (kg)', 
-    min_value=30.0, 
-    max_value=200.0, 
-    value=75.0, 
-    step=0.5, 
-    format="%.1f"
-)
-critical_power = st.number_input('Critical Power (CP) in Watts', value=350, step=1)
-w_prime_kilojoules = st.number_input("W' (kJ)", 20.0, 1.0, 100.0, 1.0, "%.1f")
+
+    st.header("2. Set Parameters")
+    rider_weight_kg = st.number_input(
+        'Weight (kg)', 
+        min_value=30.0, 
+        max_value=200.0, 
+        value=75.0, 
+        step=0.5, 
+        format="%.1f"
+    )
+    critical_power = st.number_input('Critical Power (CP) in Watts', value=350, step=1)
+    w_prime_kilojoules = st.number_input("W' (kJ)", value=20.0, min_value=1.0, max_value=100.0, step=1.0, format="%.1f")
     
     with st.expander("Advanced Model Parameters (Tau)"):
         tau_a = st.number_input('Parameter A', value=5187, step=1)
