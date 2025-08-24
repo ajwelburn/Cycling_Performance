@@ -64,7 +64,7 @@ st.markdown("Enter your 3-minute and 12-minute maximal power, and your weight, t
 
 # --- Main Layout ---
 # Create two columns: one for inputs and one for the results.
-input_col, results_col = st.columns([1, 2])
+input_col, results_col = st.columns([1, 3])
 
 # --- Column for User Inputs ---
 with input_col:
@@ -276,3 +276,4 @@ if analyse_button:
                 msp = (W_prime / duration_input_sec) + CP
                 
                 custom_metric(f"Predicted Max Power for {duration_input_min} minutes", f"{msp:.0f}", "W")
+
