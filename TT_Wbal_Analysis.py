@@ -720,8 +720,9 @@ if 'results' in st.session_state:
                 legend=dict(title="Gradient")
             )
             fig_dist.update_xaxes(title_text="Distance (km)", showline=True, linewidth=2, linecolor='black')
-            fig_dist.update_yaxes(title_text="Elevation (m)", showline=True, linewidth=2, linecolor='black', secondary_y=True)
             fig_dist.update_yaxes(title_text="W'bal (kJ)", showline=True, linewidth=2, linecolor='black', secondary_y=False, range=yaxis_range)
+            fig_dist.update_yaxes(title_text="Elevation (m)", showline=True, linewidth=2, linecolor='black', secondary_y=True)
+           
          
             st.plotly_chart(fig_dist, use_container_width=True)
     with tabs[4]: # Power Profile
