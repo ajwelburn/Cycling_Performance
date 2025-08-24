@@ -1,4 +1,4 @@
-import streamlit as st
+mport streamlit as st
 import numpy as np
 import plotly.graph_objects as go
 
@@ -76,7 +76,7 @@ if analyse_button:
             # --- Power-Duration Curve ---
             st.header("📊 Your Power-Duration Curve")
             time_curve = np.arange(20, 901)
-            power_curve = (metrics['cp'] * time_curve + (metrics['w_prime_kj'] * 1000)) / time_curve
+            power_curve = (metrics['w_prime_kj'] * 1000 / time_curve) + metrics['cp']
 
             fig_pd = go.Figure()
             # CP Line
