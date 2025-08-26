@@ -14,7 +14,7 @@ st.markdown("""
     margin-bottom: 10px;
 }
 .metric-label {
-    font-size: 1rem;
+    font-size: 0.9rem;
     color: #808495;
 }
 .metric-value-container {
@@ -22,11 +22,11 @@ st.markdown("""
     align-items: baseline;
 }
 .metric-value {
-    font-size: 2rem;
+    font-size: 1.75rem;
     font-weight: bold;
 }
 .metric-unit {
-    font-size: 1.1rem;
+    font-size: 1rem;
     margin-left: 0.3rem;
 }
 .metric-delta {
@@ -60,7 +60,7 @@ st.title("⚡ CP and W' Calculator")
 st.markdown("Enter your 3-minute and 12-minute maximal power, and your weight, to calculate your Critical Power and W'.")
 
 # --- Sidebar for User Inputs ---
-st.sidebar.title("⚙️ Your Test Data")
+st.sidebar.header("User Inputs")
 p3 = st.sidebar.number_input("3-Minute Power (W)", min_value=100, max_value=1000, value=350, step=1)
 p12 = st.sidebar.number_input("12-Minute Power (W)", min_value=100, max_value=1000, value=300, step=1)
 weight = st.sidebar.number_input("Weight (kg)", min_value=40.0, max_value=150.0, value=70.0, step=0.1)
@@ -187,14 +187,14 @@ else:
         )
     )
     
-    # Add solid axis lines and more prominent inside ticks
-    fig_pd.update_xaxes(showline=True, linewidth=1, linecolor='black', ticks='inside', ticklen=6, tickwidth=1)
-    fig_pd.update_yaxes(showline=True, linewidth=1, linecolor='black', ticks='inside', ticklen=6, tickwidth=1)
+    # Add solid axis lines and inside ticks
+    fig_pd.update_xaxes(showline=True, linewidth=1, linecolor='black', ticks='inside')
+    fig_pd.update_yaxes(showline=True, linewidth=1, linecolor='black', ticks='inside')
 
     st.plotly_chart(fig_pd, use_container_width=True)
     
     # --- Linear Power vs. 1/Time Graph ---
-    with st.expander("🔍 Show the Linear Model Calculation"):
+    with st.expander("Show Linear Model (Power vs. 1/Time)"):
         fig_linear = go.Figure()
 
         # Add the two test points
@@ -232,7 +232,7 @@ else:
         st.markdown(f"The slope of the line is your **W' ({W_prime_kj:.1f} kJ)**, and the y-intercept is your **Critical Power ({CP:.1f} W)**.")
 
     # --- Comparison Section ---
-    with st.expander("🔄 Compare to a Previous Test"):
+    with st.expander("Compare To Previous Results"):
         st.write("Enter your previous test results to see the change.")
         prev_p3 = st.number_input("Previous 3-Min Power (W)", value=0, step=1, key="prev_p3")
         prev_p12 = st.number_input("Previous 12-Min Power (W)", value=0, step=1, key="prev_p12")
@@ -259,13 +259,10 @@ else:
 
 
     # --- Maximal Sustainable Power Calculator ---
-    with st.expander("⏱️ Predict Max Power for a Custom Duration"):
+    with st.expander("Calculate Maximal Sustainable Power for a Custom Duration"):
         duration_input_min = st.number_input("Enter duration (minutes)", min_value=3, max_value=15, value=5, step=1, key="msp_input")
         
         duration_input_sec = duration_input_min * 60
         msp = (W_prime / duration_input_sec) + CP
         
         custom_metric(f"Predicted Max Power for {duration_input_min} minutes", f"{msp:.0f}", "W")
-                
-                custom_metric(f"Predicted Max Power for {duration_input_min} minutes", f"{msp:.0f}", "W")
-
