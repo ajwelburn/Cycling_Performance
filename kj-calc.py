@@ -113,6 +113,30 @@ def parse_hhmmss_to_seconds(hhmmss_str):
 
     return hours * 3600 + minutes * 60 + seconds
 
+def get_carbs_recommendation(total_time_s):
+    """Provides carbohydrate intake recommendations based on total duration (seconds)."""
+    
+    total_time_hours = total_time_s / 3600
+    
+    if total_time_hours <= 0:
+        return "No session defined."
+    elif total_time_hours < 1:
+        # Less than 1 hour, fueling is usually not required unless high intensity
+        rate = "0–30 g/h (Focus on water/electrolytes)"
+        total_g = 0
+    elif total_time_hours <= 2.5:
+        # 1 to 2.5 hours
+        rate = "30–60 g/h"
+        # Calculate for a mid-range of 45 g/h
+        total_g = round(total_time_hours * 45)
+    else:
+        # Over 2.5 hours
+        rate = "60–90 g/h (Up to 120 g/h for elite/specialized)"
+        # Calculate for a mid-range of 75 g/h
+        total_g = round(total_time_hours * 75)
+    
+    return rate, total_g
+
 
 # --- 2. LAYOUT AND INPUTS ---
 
@@ -304,7 +328,8 @@ with session_cols[0]:
                 "duration_s": step['duration'],
                 "power_w": power_w,
                 "zone_color": zone_color,
-                "zone_name": zone_name
+                "zone_name": zone_name,
+                "step_index": i + 1, # Add step index for better tooltips
             })
             current_time_offset += step['duration']
 
@@ -338,7 +363,13 @@ with session_cols[0]:
                 color=alt.Color('zone_name', 
                                 title='Zone',
                                 scale=alt.Scale(domain=[z['name'] for z in ZONE_MAP], range=[z['color'] for z in ZONE_MAP]),
-                                legend=None) # Hide legend for cleaner look, zones are listed above
+                                legend=None), # Hide legend for cleaner look, zones are listed above
+                tooltip=[
+                    alt.Tooltip('step_index', title='Step'),
+                    alt.Tooltip('duration_s', title='Duration (s)'),
+                    alt.Tooltip('power_w', title='Power (W)'),
+                    alt.Tooltip('zone_name', title='Zone')
+                ]
             ).properties(
                 title='Workout Power Profile',
                 height=300
@@ -390,10 +421,32 @@ with session_cols[1]:
     col_metrics = st.columns(2)
     
     col_metrics[0].metric("Total Duration", format_time_duration(total_time_s))
-    col_metrics[1].metric("Total Work (kJ)", f"{total_work_kj:.1f} kJ")
+    # Removed decimals on Total Work (kJ)
+    col_metrics[1].metric("Total Work (kJ)", f"{total_work_kj:.0f} kJ") 
     
     col_metrics[0].metric("kJ Above CP", f"{total_work_above_cp_kj:.1f} kJ")
     col_metrics[1].metric("kJ/kg", f"{total_kj_per_kg:.2f}")
 
     col_metrics[0].metric("Avg Power (W)", f"{avg_power_w:.0f} W")
-    col_metrics[1].metric("Total kJ/hour", f"{total_kj_per_hour:.1f} kJ/h")
+    # Removed decimals on Total kJ/hour
+    col_metrics[1].metric("Total kJ/hour", f"{total_kj_per_hour:.0f} kJ/h")
+    
+    st.markdown("---")
+    
+    # --- 8. FUELING RECOMMENDATIONS ---
+    # Changed water drop (💧) to fuel pump (⛽) emoji
+    st.subheader("⛽ Fueling Recommendation") 
+    
+    carbs_rate_str, total_carbs_g = get_carbs_recommendation(total_time_s)
+    
+    if total_time_s > 3600:
+        st.metric(f"Estimated Total Carbs Needed", f"{total_carbs_g} g")
+
+    st.markdown(f"""
+        <div style="background-color: #f0f8ff; padding: 10px; border-radius: 8px; border: 1px solid #3b82f6;">
+            <p style="font-weight: 700; color: #3b82f6;">Target Intake Rate (g/hr):</p>
+            <p style="font-size: 1.1em; margin: 0;">{carbs_rate_str}</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    st.caption("These guidelines are based on current sports nutrition research for endurance cycling.")
