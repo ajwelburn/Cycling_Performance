@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 from datetime import timedelta
-import altair as alt # For chart visualization
+import altair as alt
+import re # For regular expression for time parsing
 
 # --- 1. CONFIGURATION AND UTILITIES ---
 
@@ -88,7 +89,29 @@ def format_time_duration(seconds):
     """Formats seconds into HH:MM:SS string."""
     if seconds <= 0 or pd.isna(seconds):
         return "00:00:00"
-    return str(timedelta(seconds=round(seconds)))
+    hours, remainder = divmod(round(seconds), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}"
+
+def parse_hhmmss_to_seconds(hhmmss_str):
+    """Parses HH:MM:SS string to total seconds."""
+    if not hhmmss_str:
+        return 0
+    
+    # Regex to match H:M:S, HH:MM:SS, M:S, MM:SS formats
+    match = re.match(r'^(?:(\d+):)?(\d{1,2}):(\d{1,2})$', hhmmss_str)
+    if not match:
+        return None # Indicate invalid format
+
+    parts = match.groups()
+    hours = int(parts[0]) if parts[0] else 0
+    minutes = int(parts[1])
+    seconds = int(parts[2])
+
+    if minutes >= 60 or seconds >= 60:
+        return None # Invalid minutes/seconds values
+
+    return hours * 3600 + minutes * 60 + seconds
 
 
 # --- 2. LAYOUT AND INPUTS ---
@@ -184,20 +207,30 @@ st.markdown("---")
 # --- 5. SESSION BUILDER ---
 st.header("📝 Workout Builder")
 
-def add_step():
-    """Adds a new step to the session state list."""
-    duration = st.session_state.new_duration * 60 # Convert minutes to seconds
-    power_type = st.session_state.new_power_type
-    value = st.session_state.new_power_value
-    
-    if duration > 0 and value > 0:
+# --- Custom input for duration in HH:MM:SS ---
+duration_str = st.text_input("Duration (HH:MM:SS)", value="00:05:00", key='new_duration_str',
+                             help="Enter duration in HH:MM:SS, MM:SS, or M:S format. E.g., 00:05:00, 5:00, 1:30")
+
+# Parse and validate duration
+new_duration_seconds = parse_hhmmss_to_seconds(duration_str)
+if new_duration_seconds is None:
+    st.error("Invalid duration format. Please use HH:MM:SS (e.g., 00:05:00) or MM:SS (e.g., 05:00).")
+    # Set a placeholder value if invalid to prevent errors downstream, but block add step
+    new_duration_seconds = 0 
+
+
+def add_step_callback():
+    """Callback for adding a new step."""
+    if new_duration_seconds > 0: # Only add if duration is valid and > 0
         st.session_state.session_steps.append({
-            'duration': duration,
-            'type': power_type,
-            'value': value,
+            'duration': new_duration_seconds,
+            'type': st.session_state.new_power_type,
+            'value': st.session_state.new_power_value,
             'id': len(st.session_state.session_steps) # Simple ID
         })
         st.toast("Workout step added!", icon="✅")
+    else:
+        st.warning("Cannot add step with invalid or zero duration.")
 
 def remove_step(index):
     """Removes a step by its index in the list."""
@@ -207,15 +240,16 @@ def remove_step(index):
 
 # Input controls for adding steps
 input_cols = st.columns([2, 1, 1, 1])
-with input_cols[0]:
-    st.number_input("Duration (Minutes)", min_value=1, value=5, key='new_duration')
+with input_cols[0]: # This column now implicitly handles the duration_str text input above
+    pass # Duration input is already defined
 with input_cols[1]:
     st.selectbox("Power Type", ('% CP', 'W'), key='new_power_type')
 with input_cols[2]:
     st.number_input("Value", min_value=1, value=70, step=1, key='new_power_value')
 with input_cols[3]:
     st.markdown("<br>", unsafe_allow_html=True) # Space to align button
-    st.button("➕ Add Step", on_click=add_step, use_container_width=True)
+    st.button("➕ Add Step", on_click=add_step_callback, use_container_width=True, 
+              disabled=(new_duration_seconds == 0)) # Disable if duration is invalid or zero
 
 
 session_cols = st.columns([2, 1])
@@ -231,6 +265,8 @@ with session_cols[0]:
         chart_data = [] # For Altair chart
         current_time_offset = 0
 
+        max_power_in_session = 0 # To determine dynamic y-axis scale
+
         for i, step in enumerate(st.session_state.session_steps):
             power_w = 0
             
@@ -244,6 +280,8 @@ with session_cols[0]:
             else:
                 power_w = step['value']
                 power_display = f"{power_w:.0f} W (CP required)"
+
+            max_power_in_session = max(max_power_in_session, power_w)
 
             # Determine zone for chart color
             percent_cp_actual = (power_w / cp) * 100 if cp > 0 else 0
@@ -279,14 +317,28 @@ with session_cols[0]:
         if chart_data:
             df_chart = pd.DataFrame(chart_data)
 
+            # Determine y-axis scale based on highest power
+            y_max_scale = 1000 # Default max
+            if max_power_in_session > 1000:
+                y_max_scale = max_power_in_session * 1.5 # 50% above highest if it exceeds 1000W
+            
             # Create the Altair chart
-            chart = alt.Chart(df_chart).mark_bar().encode(
-                x=alt.X('start_time_s', title='Time (s)', axis=alt.Axis(format='m', title='Time (Minutes)')),
+            chart = alt.Chart(df_chart).mark_bar(
+                stroke='white', # Add a white stroke to create distinct box-like appearance
+                strokeWidth=1
+            ).encode(
+                x=alt.X('start_time_s', 
+                        title='Time (s)', 
+                        axis=alt.Axis(format='m', title='Time (Minutes)'),
+                        scale=alt.Scale(domain=[0, df_chart['end_time_s'].max()])), # Ensure x-axis starts at 0 and extends to end
                 x2='end_time_s',
-                y=alt.Y('power_w', title='Power (Watts)', scale=alt.Scale(domain=[0, df_chart['power_w'].max() * 1.2])),
+                y=alt.Y('power_w', 
+                        title='Power (Watts)', 
+                        scale=alt.Scale(domain=[0, y_max_scale])), # Dynamic Y-axis scale
                 color=alt.Color('zone_name', 
                                 title='Zone',
-                                scale=alt.Scale(domain=[z['name'] for z in ZONE_MAP], range=[z['color'] for z in ZONE_MAP])) # Use defined colors
+                                scale=alt.Scale(domain=[z['name'] for z in ZONE_MAP], range=[z['color'] for z in ZONE_MAP]),
+                                legend=None) # Hide legend for cleaner look, zones are listed above
             ).properties(
                 title='Workout Power Profile',
                 height=300
