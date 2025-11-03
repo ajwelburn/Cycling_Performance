@@ -326,10 +326,12 @@ with session_cols[0]:
 
             max_power_in_session = max(max_power_in_session, power_w)
 
-            # Determine zone name for color display
+            # Determine zone name and color (FIXED: Ensure these are always defined)
             percent_cp_actual = (power_w / cp) * 100 if cp > 0 else 0
             zone_info = next((z for z in ZONE_MAP if percent_cp_actual >= z['min'] and percent_cp_actual <= z['max']), None)
+            
             zone_name = zone_info['name'] if zone_info else "Unknown"
+            zone_color = zone_info['color'] if zone_info else "#cccccc" # Default gray fallback
             
             # --- Rendering the row data in Markdown table format ---
             st.markdown(f"| {i+1} | {format_time_duration(step['duration'])} | {power_display} | {zone_name} |", unsafe_allow_html=True)
