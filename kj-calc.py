@@ -119,7 +119,8 @@ def get_carbs_recommendation(total_time_s):
     total_time_hours = total_time_s / 3600
     
     if total_time_hours <= 0:
-        return "No session defined."
+        # FIX: Ensure a tuple of two items is always returned for unpacking to work.
+        return "No session defined.", 0
     elif total_time_hours < 1:
         # Less than 1 hour, fueling is usually not required unless high intensity
         rate = "0–30 g/h (Focus on water/electrolytes)"
@@ -250,11 +251,21 @@ def add_step_callback():
             'duration': new_duration_seconds,
             'type': st.session_state.new_power_type,
             'value': st.session_state.new_power_value,
-            'id': len(st.session_state.session_steps) # Simple ID
+            'id': pd.Timestamp.now().value # Use a unique ID based on timestamp
         })
         st.toast("Workout step added!", icon="✅")
     else:
         st.warning("Cannot add step with invalid or zero duration.")
+
+def copy_step_callback(step_data):
+    """Callback for copying an existing step."""
+    st.session_state.session_steps.append({
+        'duration': step_data['duration'],
+        'type': step_data['type'],
+        'value': step_data['value'],
+        'id': pd.Timestamp.now().value # New unique ID
+    })
+    st.toast("Workout step copied!", icon="📋")
 
 def remove_step(index):
     """Removes a step by its index in the list."""
@@ -313,12 +324,18 @@ with session_cols[0]:
             zone_name = zone_info['name'] if zone_info else "Unknown"
             zone_color = zone_info['color'] if zone_info else "#cccccc" # Default gray
 
+            # Add two buttons: Copy and Remove
+            col_d, col_r = st.columns([0.5, 0.5])
+            with col_d:
+                copy_button = st.button("Copy 📋", key=f"copy_{step['id']}", on_click=copy_step_callback, args=(step,), use_container_width=True)
+            with col_r:
+                remove_button = st.button("Remove 🗑️", key=f"remove_{step['id']}", on_click=remove_step, args=(i,), use_container_width=True)
+
             step_data_for_display.append({
                 "#": i + 1,
                 "Duration": format_time_duration(step['duration']),
                 "Target": power_display,
                 "Zone": zone_name,
-                "Action": st.button("Remove", key=f"remove_{step['id']}", on_click=remove_step, args=(i,)),
             })
 
             # Prepare data for chart
@@ -333,9 +350,43 @@ with session_cols[0]:
             })
             current_time_offset += step['duration']
 
+        # Custom display for steps with action buttons
+        # We display the list manually since st.dataframe doesn't handle button columns well
+        st.markdown("**Current Steps:**")
+        st.markdown(
+            """
+            | # | Duration | Target | Zone |
+            |---|---|---|---|
+            """, unsafe_allow_html=True
+        )
+        for i, step in enumerate(st.session_state.session_steps):
+            power_w = 0
+            if step['type'] == '% CP' and cp > 0:
+                power_w = cp * step['value'] / 100
+                power_display = f"{step['value']}% CP ({power_w:.0f} W)"
+            elif step['type'] == 'W':
+                power_w = step['value']
+                percent = (power_w / cp) * 100 if cp > 0 else 0
+                power_display = f"{power_w:.0f} W ({percent:.1f}% CP)"
+            else:
+                power_w = step['value']
+                power_display = f"{power_w:.0f} W (CP required)"
 
-        df_steps_display = pd.DataFrame(step_data_for_display)
-        st.dataframe(df_steps_display, hide_index=True, use_container_width=True)
+            # Determine zone name for color display
+            percent_cp_actual = (power_w / cp) * 100 if cp > 0 else 0
+            zone_info = next((z for z in ZONE_MAP if percent_cp_actual >= z['min'] and percent_cp_actual <= z['max']), None)
+            zone_name = zone_info['name'] if zone_info else "Unknown"
+            
+            st.markdown(f"| {i+1} | {format_time_duration(step['duration'])} | {power_display} | {zone_name} |", unsafe_allow_html=True)
+            
+            # Action buttons for this row
+            col_d, col_r, _ = st.columns([0.2, 0.2, 0.6])
+            with col_d:
+                st.button("Copy 📋", key=f"copy_{step['id']}", on_click=copy_step_callback, args=(step,), use_container_width=True)
+            with col_r:
+                st.button("Remove 🗑️", key=f"remove_{step['id']}", on_click=remove_step, args=(i,), use_container_width=True)
+            st.markdown("---")
+            
 
         # --- Workout Visualization ---
         st.subheader("Workout Visualization")
@@ -347,15 +398,14 @@ with session_cols[0]:
             if max_power_in_session > 1000:
                 y_max_scale = max_power_in_session * 1.5 # 50% above highest if it exceeds 1000W
             
-            # Create the Altair chart
+            # Create the Altair chart using mark_bar for solid blocks
             chart = alt.Chart(df_chart).mark_bar(
-                stroke='white', # Add a white stroke to create distinct box-like appearance
-                strokeWidth=1
+                strokeWidth=0, # Remove stroke for contiguous solid blocks
             ).encode(
                 x=alt.X('start_time_s', 
                         title='Time (s)', 
-                        axis=alt.Axis(format='m', title='Time (Minutes)'),
-                        scale=alt.Scale(domain=[0, df_chart['end_time_s'].max()])), # Ensure x-axis starts at 0 and extends to end
+                        axis=alt.Axis(format='m', title='Time (Minutes)'), # Format axis to show minutes
+                        scale=alt.Scale(domain=[0, df_chart['end_time_s'].max()])),
                 x2='end_time_s',
                 y=alt.Y('power_w', 
                         title='Power (Watts)', 
@@ -363,7 +413,7 @@ with session_cols[0]:
                 color=alt.Color('zone_name', 
                                 title='Zone',
                                 scale=alt.Scale(domain=[z['name'] for z in ZONE_MAP], range=[z['color'] for z in ZONE_MAP]),
-                                legend=None), # Hide legend for cleaner look, zones are listed above
+                                legend=None), 
                 tooltip=[
                     alt.Tooltip('step_index', title='Step'),
                     alt.Tooltip('duration_s', title='Duration (s)'),
@@ -450,3 +500,4 @@ with session_cols[1]:
     """, unsafe_allow_html=True)
     
     st.caption("These guidelines are based on current sports nutrition research for endurance cycling.")
+
