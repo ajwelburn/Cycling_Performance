@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import timedelta
+import altair as alt # For chart visualization
 
 # --- 1. CONFIGURATION AND UTILITIES ---
 
@@ -14,9 +15,9 @@ st.set_page_config(
 # Custom style for the 'Steam Lit' aesthetic
 st.markdown("""
 <style>
-    /* Main Streamlit Theme Tweak - White/Light Blue */
+    /* Main Streamlit Theme Tweak - White background */
     .stApp {
-        background-color: #eff6ff; /* Light blue background */
+        background-color: #ffffff; /* Pure White background */
     }
     /* Header/Title */
     .st-emotion-cache-18ni7ap { /* Class for st.title container */
@@ -48,27 +49,27 @@ st.markdown("""
     .stButton>button:hover {
         background-color: #2563eb;
     }
-    /* Zone colors in table */
-    .zone-active-recovery { background-color: #9ca3af; color: white; }
-    .zone-endurance { background-color: #10b981; color: white; }
-    .zone-aerobic-intervals { background-color: #f59e0b; color: black; }
-    .zone-threshold { background-color: #f97316; color: white; }
-    .zone-vo2-max { background-color: #ef4444; color: white; }
-    .zone-anaerobic-intervals { background-color: #9333ea; color: white; }
-    .zone-neuromuscular { background-color: #ec4899; color: white; }
+    /* Zone colors in table and chart - using hex codes directly for Altair and CSS */
+    .zone-active-recovery { background-color: #9ca3af; color: white; } /* Gray */
+    .zone-endurance { background-color: #10b981; color: white; } /* Green */
+    .zone-aerobic-intervals { background-color: #f59e0b; color: black; } /* Amber */
+    .zone-threshold { background-color: #f97316; color: white; } /* Orange */
+    .zone-vo2-max { background-color: #ef4444; color: white; } /* Red */
+    .zone-anaerobic-intervals { background-color: #9333ea; color: white; } /* Purple */
+    .zone-neuromuscular { background-color: #ec4899; color: white; } /* Pink */
 </style>
 """, unsafe_allow_html=True)
 
 
-# Training Zone Definitions
+# Training Zone Definitions with Hex Colors for Altair
 ZONE_MAP = [
-    {"name": "Active Recovery", "min": 0, "max": 55, "class": "zone-active-recovery"},
-    {"name": "Endurance", "min": 56, "max": 75, "class": "zone-endurance"},
-    {"name": "Aerobic Intervals", "min": 76, "max": 90, "class": "zone-aerobic-intervals"},
-    {"name": "Threshold", "min": 91, "max": 105, "class": "zone-threshold"},
-    {"name": "VO2 Max", "min": 106, "max": 130, "class": "zone-vo2-max"},
-    {"name": "Anaerobic Intervals", "min": 131, "max": 180, "class": "zone-anaerobic-intervals"},
-    {"name": "Neuromuscular", "min": 181, "max": 500, "class": "zone-neuromuscular"}
+    {"name": "Active Recovery", "min": 0, "max": 55, "class": "zone-active-recovery", "color": "#9ca3af"},
+    {"name": "Endurance", "min": 56, "max": 75, "class": "zone-endurance", "color": "#10b981"},
+    {"name": "Aerobic Intervals", "min": 76, "max": 90, "class": "zone-aerobic-intervals", "color": "#f59e0b"},
+    {"name": "Threshold", "min": 91, "max": 105, "class": "zone-threshold", "color": "#f97316"},
+    {"name": "VO2 Max", "min": 106, "max": 130, "class": "zone-vo2-max", "color": "#ef4444"},
+    {"name": "Anaerobic Intervals", "min": 131, "max": 180, "class": "zone-anaerobic-intervals", "color": "#9333ea"},
+    {"name": "Neuromuscular", "min": 181, "max": 500, "class": "zone-neuromuscular", "color": "#ec4899"}
 ]
 
 # Initialize session state for the workout steps list
@@ -85,17 +86,10 @@ def calculate_time_for_work(kj, power_w):
 
 def format_time_duration(seconds):
     """Formats seconds into HH:MM:SS string."""
-    if seconds <= 0:
+    if seconds <= 0 or pd.isna(seconds):
         return "00:00:00"
     return str(timedelta(seconds=round(seconds)))
 
-def format_time_min_sec(seconds):
-    """Formats seconds into MM:SS string."""
-    if seconds <= 0 or pd.isna(seconds):
-        return "--:--"
-    m = int(seconds // 60)
-    s = int(seconds % 60)
-    return f"{m:02d}:{s:02d}"
 
 # --- 2. LAYOUT AND INPUTS ---
 
@@ -143,7 +137,7 @@ with main_cols[0]:
     else:
         st.info("Enter CP to calculate training zones.")
 
-# --- 4. KJ TIME CALCULATOR ---
+# --- 4. KJ TIME CALCULATOR (HH:MM:SS) ---
 with main_cols[1]:
     st.subheader("⏳ Work-Time Calculator (2000 kJ & 3000 kJ)")
     
@@ -179,11 +173,11 @@ with main_cols[1]:
 
     with calc_cols[1]:
         st.markdown("##### Time for 2000 kJ")
-        st.metric("Required Time", format_time_min_sec(time_2000))
+        st.metric("Required Time", format_time_duration(time_2000)) 
 
     with calc_cols[2]:
         st.markdown("##### Time for 3000 kJ")
-        st.metric("Required Time", format_time_min_sec(time_3000))
+        st.metric("Required Time", format_time_duration(time_3000))
 
 st.markdown("---")
 
@@ -226,14 +220,17 @@ with input_cols[3]:
 
 session_cols = st.columns([2, 1])
 
-# --- 6. SESSION BREAKDOWN (List) ---
+# --- 6. SESSION BREAKDOWN (List & Visualization) ---
 with session_cols[0]:
     st.subheader("Session Breakdown")
     
     if not st.session_state.session_steps:
         st.info("Use the controls above to start building your workout.")
     else:
-        step_data = []
+        step_data_for_display = [] # For the dataframe
+        chart_data = [] # For Altair chart
+        current_time_offset = 0
+
         for i, step in enumerate(st.session_state.session_steps):
             power_w = 0
             
@@ -248,15 +245,57 @@ with session_cols[0]:
                 power_w = step['value']
                 power_display = f"{power_w:.0f} W (CP required)"
 
-            step_data.append({
+            # Determine zone for chart color
+            percent_cp_actual = (power_w / cp) * 100 if cp > 0 else 0
+            zone_info = next((z for z in ZONE_MAP if percent_cp_actual >= z['min'] and percent_cp_actual <= z['max']), None)
+            zone_name = zone_info['name'] if zone_info else "Unknown"
+            zone_color = zone_info['color'] if zone_info else "#cccccc" # Default gray
+
+            step_data_for_display.append({
                 "#": i + 1,
-                "Duration": format_time_min_sec(step['duration']),
+                "Duration": format_time_duration(step['duration']),
                 "Target": power_display,
+                "Zone": zone_name,
                 "Action": st.button("Remove", key=f"remove_{step['id']}", on_click=remove_step, args=(i,)),
             })
 
-        df_steps = pd.DataFrame(step_data)
-        st.dataframe(df_steps, hide_index=True, use_container_width=True)
+            # Prepare data for chart
+            chart_data.append({
+                "start_time_s": current_time_offset,
+                "end_time_s": current_time_offset + step['duration'],
+                "duration_s": step['duration'],
+                "power_w": power_w,
+                "zone_color": zone_color,
+                "zone_name": zone_name
+            })
+            current_time_offset += step['duration']
+
+
+        df_steps_display = pd.DataFrame(step_data_for_display)
+        st.dataframe(df_steps_display, hide_index=True, use_container_width=True)
+
+        # --- Workout Visualization ---
+        st.subheader("Workout Visualization")
+        if chart_data:
+            df_chart = pd.DataFrame(chart_data)
+
+            # Create the Altair chart
+            chart = alt.Chart(df_chart).mark_bar().encode(
+                x=alt.X('start_time_s', title='Time (s)', axis=alt.Axis(format='m', title='Time (Minutes)')),
+                x2='end_time_s',
+                y=alt.Y('power_w', title='Power (Watts)', scale=alt.Scale(domain=[0, df_chart['power_w'].max() * 1.2])),
+                color=alt.Color('zone_name', 
+                                title='Zone',
+                                scale=alt.Scale(domain=[z['name'] for z in ZONE_MAP], range=[z['color'] for z in ZONE_MAP])) # Use defined colors
+            ).properties(
+                title='Workout Power Profile',
+                height=300
+            ).interactive() # Enable zooming and panning
+
+            st.altair_chart(chart, use_container_width=True)
+        else:
+            st.info("Add steps to visualize your workout.")
+
 
 # --- 7. TOTAL METRICS (Calculations) ---
 with session_cols[1]:
@@ -290,7 +329,7 @@ with session_cols[1]:
 
     # Final calculations
     effective_weight = weight if weight > 0 else 75
-    total_kj_per_kg = total_work_kj / effective_weight if total_work_kj > 0 else 0
+    total_kj_per_kg = total_work_kj / effective_weight if effective_weight > 0 else 0
     avg_power_w = (total_work_kj * 1000) / total_time_s if total_time_s > 0 else 0
     total_kj_per_hour = (total_work_kj / total_time_s) * 3600 if total_time_s > 0 else 0
 
