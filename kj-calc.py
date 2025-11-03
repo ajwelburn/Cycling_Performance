@@ -58,15 +58,30 @@ st.markdown("""
     .zone-vo2-max { background-color: #ef4444; color: white; } /* Red */
     .zone-anaerobic-intervals { background-color: #9333ea; color: white; } /* Purple */
     .zone-neuromuscular { background-color: #ec4899; color: white; } /* Pink */
-    /* Custom Styling for Step Breakdown */
-    .step-row {
-        padding: 10px 0;
-        border-bottom: 1px solid #eee;
+    /* Custom Styling for Step Breakdown (Improved readability) */
+    .step-detail-box {
+        background-color: #f8f8f8;
+        padding: 10px;
+        border-radius: 8px;
+        border: 1px solid #ddd;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
     }
     .step-index {
-        font-size: 1.5em;
+        font-size: 1.2em;
         font-weight: 700;
         color: #3b82f6;
+        min-width: 30px;
+        margin-right: 15px;
+    }
+    .step-content {
+        flex-grow: 1;
+        font-size: 0.9em;
+    }
+    .step-content strong {
+        font-size: 1.1em;
+        color: #1f2937;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -313,7 +328,7 @@ with session_cols[0]:
         st.info("Use the controls above to start building your workout.")
     else:
         chart_data = [] # For Altair chart
-        current_time_offset = 0
+        current_time_offset_min = 0 # Track time offset in MINUTES for X-axis
 
         max_power_in_session = 0 # To determine dynamic y-axis scale
         
@@ -371,16 +386,19 @@ with session_cols[0]:
             st.markdown("---")
             
             # Prepare data for chart
+            step_duration_min = step['duration'] / 60
+            
             chart_data.append({
-                "start_time_s": current_time_offset,
-                "end_time_s": current_time_offset + step['duration'],
+                # Use minutes for X-axis fields
+                "start_time_min": current_time_offset_min,
+                "end_time_min": current_time_offset_min + step_duration_min,
                 "duration_s": step['duration'],
                 "power_w": power_w,
                 "zone_color": zone_color,
                 "zone_name": zone_name,
                 "step_index": i + 1, # Add step index for better tooltips
             })
-            current_time_offset += step['duration']
+            current_time_offset_min += step_duration_min
             
 
         # --- Workout Visualization ---
@@ -395,14 +413,15 @@ with session_cols[0]:
             
             # Create the Altair chart using mark_bar for solid blocks
             chart = alt.Chart(df_chart).mark_bar(
-                strokeWidth=0, # Remove stroke for contiguous solid blocks (solid area fill)
+                stroke='white', # Added white stroke to create distinct boxed look
+                strokeWidth=0.5, 
             ).encode(
-                x=alt.X('start_time_s', 
-                        title='Time (s)', 
-                        # FIX: Make the axis labels show minutes and force 5-minute steps
-                        axis=alt.Axis(format='m', title='Time (Minutes)', tickCount=alt.Number(step=300)), 
-                        scale=alt.Scale(domain=[0, df_chart['end_time_s'].max()])),
-                x2='end_time_s',
+                # Use minutes for X-axis fields
+                x=alt.X('start_time_min', 
+                        title='Time (Minutes)', 
+                        axis=alt.Axis(title='Time (Minutes)'),
+                        scale=alt.Scale(domain=[0, df_chart['end_time_min'].max()])),
+                x2='end_time_min',
                 y=alt.Y('power_w', 
                         title='Power (Watts)', 
                         scale=alt.Scale(domain=[0, y_max_scale])), # Dynamic Y-axis scale
@@ -496,3 +515,4 @@ with session_cols[1]:
     """, unsafe_allow_html=True)
     
     st.caption("These guidelines are based on current sports nutrition research for endurance cycling.")
+
