@@ -263,7 +263,7 @@ def copy_step_callback(step_data):
         'duration': step_data['duration'],
         'type': step_data['type'],
         'value': step_data['value'],
-        'id': pd.Timestamp.now().value # New unique ID
+        'id': pd.Timestamp.now().value + 1 # New unique ID (ensure unique even if timestamp is same)
     })
     st.toast("Workout step copied!", icon="📋")
 
@@ -296,11 +296,19 @@ with session_cols[0]:
     if not st.session_state.session_steps:
         st.info("Use the controls above to start building your workout.")
     else:
-        step_data_for_display = [] # For the dataframe
         chart_data = [] # For Altair chart
         current_time_offset = 0
 
         max_power_in_session = 0 # To determine dynamic y-axis scale
+        
+        # Custom display for steps with action buttons
+        st.markdown("**Current Steps:**")
+        st.markdown(
+            """
+            | # | Duration | Target | Zone |
+            |---|---|---|---|
+            """, unsafe_allow_html=True
+        )
 
         for i, step in enumerate(st.session_state.session_steps):
             power_w = 0
@@ -318,26 +326,26 @@ with session_cols[0]:
 
             max_power_in_session = max(max_power_in_session, power_w)
 
-            # Determine zone for chart color
+            # Determine zone name for color display
             percent_cp_actual = (power_w / cp) * 100 if cp > 0 else 0
             zone_info = next((z for z in ZONE_MAP if percent_cp_actual >= z['min'] and percent_cp_actual <= z['max']), None)
             zone_name = zone_info['name'] if zone_info else "Unknown"
-            zone_color = zone_info['color'] if zone_info else "#cccccc" # Default gray
-
-            # Add two buttons: Copy and Remove
-            col_d, col_r = st.columns([0.5, 0.5])
+            
+            # --- Rendering the row data in Markdown table format ---
+            st.markdown(f"| {i+1} | {format_time_duration(step['duration'])} | {power_display} | {zone_name} |", unsafe_allow_html=True)
+            
+            # --- Action buttons for this row (FIXED LOCATION) ---
+            # These buttons must be rendered *outside* of the markdown table string
+            # We use columns to align them horizontally beneath the table row
+            col_d, col_r, _ = st.columns([0.2, 0.2, 0.6])
             with col_d:
-                copy_button = st.button("Copy 📋", key=f"copy_{step['id']}", on_click=copy_step_callback, args=(step,), use_container_width=True)
+                # FIX: Ensure unique key for copy button
+                st.button("Copy 📋", key=f"copy_{step['id']}", on_click=copy_step_callback, args=(step,), use_container_width=True)
             with col_r:
-                remove_button = st.button("Remove 🗑️", key=f"remove_{step['id']}", on_click=remove_step, args=(i,), use_container_width=True)
-
-            step_data_for_display.append({
-                "#": i + 1,
-                "Duration": format_time_duration(step['duration']),
-                "Target": power_display,
-                "Zone": zone_name,
-            })
-
+                # FIX: Ensure unique key for remove button
+                st.button("Remove 🗑️", key=f"remove_{step['id']}", on_click=remove_step, args=(i,), use_container_width=True)
+            st.markdown("---")
+            
             # Prepare data for chart
             chart_data.append({
                 "start_time_s": current_time_offset,
@@ -349,43 +357,6 @@ with session_cols[0]:
                 "step_index": i + 1, # Add step index for better tooltips
             })
             current_time_offset += step['duration']
-
-        # Custom display for steps with action buttons
-        # We display the list manually since st.dataframe doesn't handle button columns well
-        st.markdown("**Current Steps:**")
-        st.markdown(
-            """
-            | # | Duration | Target | Zone |
-            |---|---|---|---|
-            """, unsafe_allow_html=True
-        )
-        for i, step in enumerate(st.session_state.session_steps):
-            power_w = 0
-            if step['type'] == '% CP' and cp > 0:
-                power_w = cp * step['value'] / 100
-                power_display = f"{step['value']}% CP ({power_w:.0f} W)"
-            elif step['type'] == 'W':
-                power_w = step['value']
-                percent = (power_w / cp) * 100 if cp > 0 else 0
-                power_display = f"{power_w:.0f} W ({percent:.1f}% CP)"
-            else:
-                power_w = step['value']
-                power_display = f"{power_w:.0f} W (CP required)"
-
-            # Determine zone name for color display
-            percent_cp_actual = (power_w / cp) * 100 if cp > 0 else 0
-            zone_info = next((z for z in ZONE_MAP if percent_cp_actual >= z['min'] and percent_cp_actual <= z['max']), None)
-            zone_name = zone_info['name'] if zone_info else "Unknown"
-            
-            st.markdown(f"| {i+1} | {format_time_duration(step['duration'])} | {power_display} | {zone_name} |", unsafe_allow_html=True)
-            
-            # Action buttons for this row
-            col_d, col_r, _ = st.columns([0.2, 0.2, 0.6])
-            with col_d:
-                st.button("Copy 📋", key=f"copy_{step['id']}", on_click=copy_step_callback, args=(step,), use_container_width=True)
-            with col_r:
-                st.button("Remove 🗑️", key=f"remove_{step['id']}", on_click=remove_step, args=(i,), use_container_width=True)
-            st.markdown("---")
             
 
         # --- Workout Visualization ---
@@ -400,7 +371,7 @@ with session_cols[0]:
             
             # Create the Altair chart using mark_bar for solid blocks
             chart = alt.Chart(df_chart).mark_bar(
-                strokeWidth=0, # Remove stroke for contiguous solid blocks
+                strokeWidth=0, # Remove stroke for contiguous solid blocks (solid area fill)
             ).encode(
                 x=alt.X('start_time_s', 
                         title='Time (s)', 
@@ -500,4 +471,3 @@ with session_cols[1]:
     """, unsafe_allow_html=True)
     
     st.caption("These guidelines are based on current sports nutrition research for endurance cycling.")
-
