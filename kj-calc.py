@@ -58,6 +58,16 @@ st.markdown("""
     .zone-vo2-max { background-color: #ef4444; color: white; } /* Red */
     .zone-anaerobic-intervals { background-color: #9333ea; color: white; } /* Purple */
     .zone-neuromuscular { background-color: #ec4899; color: white; } /* Pink */
+    /* Custom Styling for Step Breakdown */
+    .step-row {
+        padding: 10px 0;
+        border-bottom: 1px solid #eee;
+    }
+    .step-index {
+        font-size: 1.5em;
+        font-weight: 700;
+        color: #3b82f6;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -259,11 +269,17 @@ def add_step_callback():
 
 def copy_step_callback(step_data):
     """Callback for copying an existing step."""
+    # Create a new unique ID for the copied step
+    new_id = pd.Timestamp.now().value
+    # Simple check to avoid microsecond collision if called rapidly
+    while any(step['id'] == new_id for step in st.session_state.session_steps):
+        new_id += 1 
+        
     st.session_state.session_steps.append({
         'duration': step_data['duration'],
         'type': step_data['type'],
         'value': step_data['value'],
-        'id': pd.Timestamp.now().value + 1 # New unique ID (ensure unique even if timestamp is same)
+        'id': new_id
     })
     st.toast("Workout step copied!", icon="📋")
 
@@ -301,14 +317,18 @@ with session_cols[0]:
 
         max_power_in_session = 0 # To determine dynamic y-axis scale
         
-        # Custom display for steps with action buttons
-        st.markdown("**Current Steps:**")
-        st.markdown(
-            """
-            | # | Duration | Target | Zone |
-            |---|---|---|---|
-            """, unsafe_allow_html=True
-        )
+        # --- IMPROVED SESSION BREAKDOWN UI ---
+        st.markdown("##### Current Steps:")
+        
+        # Header Row
+        header_cols = st.columns([0.1, 0.4, 0.5, 0.3, 0.3])
+        header_cols[0].markdown("**#**")
+        header_cols[1].markdown("**Duration**")
+        header_cols[2].markdown("**Target (W / %CP)**")
+        header_cols[3].markdown("**Copy**")
+        header_cols[4].markdown("**Remove**")
+        st.markdown("---")
+
 
         for i, step in enumerate(st.session_state.session_steps):
             power_w = 0
@@ -326,26 +346,28 @@ with session_cols[0]:
 
             max_power_in_session = max(max_power_in_session, power_w)
 
-            # Determine zone name and color (FIXED: Ensure these are always defined)
+            # Determine zone name and color
             percent_cp_actual = (power_w / cp) * 100 if cp > 0 else 0
             zone_info = next((z for z in ZONE_MAP if percent_cp_actual >= z['min'] and percent_cp_actual <= z['max']), None)
             
             zone_name = zone_info['name'] if zone_info else "Unknown"
             zone_color = zone_info['color'] if zone_info else "#cccccc" # Default gray fallback
             
-            # --- Rendering the row data in Markdown table format ---
-            st.markdown(f"| {i+1} | {format_time_duration(step['duration'])} | {power_display} | {zone_name} |", unsafe_allow_html=True)
             
-            # --- Action buttons for this row (FIXED LOCATION) ---
-            # These buttons must be rendered *outside* of the markdown table string
-            # We use columns to align them horizontally beneath the table row
-            col_d, col_r, _ = st.columns([0.2, 0.2, 0.6])
-            with col_d:
-                # FIX: Ensure unique key for copy button
+            # --- Rendering the step using columns for better UI ---
+            step_cols = st.columns([0.1, 0.4, 0.5, 0.3, 0.3])
+
+            step_cols[0].markdown(f"<div class='step-index'>{i+1}</div>", unsafe_allow_html=True)
+            step_cols[1].markdown(f"**{format_time_duration(step['duration'])}**")
+            step_cols[2].markdown(f"{power_display} <span class='{zone_info['class'] if zone_info else 'zone-active-recovery'} px-2 py-0 rounded text-xs'>{zone_name}</span>", unsafe_allow_html=True)
+            
+            with step_cols[3]:
+                # Unique key for copy button
                 st.button("Copy 📋", key=f"copy_{step['id']}", on_click=copy_step_callback, args=(step,), use_container_width=True)
-            with col_r:
-                # FIX: Ensure unique key for remove button
+            with step_cols[4]:
+                # Unique key for remove button
                 st.button("Remove 🗑️", key=f"remove_{step['id']}", on_click=remove_step, args=(i,), use_container_width=True)
+            
             st.markdown("---")
             
             # Prepare data for chart
@@ -377,7 +399,8 @@ with session_cols[0]:
             ).encode(
                 x=alt.X('start_time_s', 
                         title='Time (s)', 
-                        axis=alt.Axis(format='m', title='Time (Minutes)'), # Format axis to show minutes
+                        # FIX: Make the axis labels show minutes and force 5-minute steps
+                        axis=alt.Axis(format='m', title='Time (Minutes)', tickCount=alt.Number(step=300)), 
                         scale=alt.Scale(domain=[0, df_chart['end_time_s'].max()])),
                 x2='end_time_s',
                 y=alt.Y('power_w', 
