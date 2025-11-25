@@ -59,17 +59,18 @@ def custom_metric(label, value, unit, delta=None, delta_unit="", subtext=None):
     if subtext:
         subtext_html = f'<div class="metric-subtext">{subtext}</div>'
 
+    # Note: Indentation inside the triple quotes is removed to prevent Markdown from interpreting it as a code block
     st.markdown(f"""
-        <div class="metric-container">
-            <div class="metric-label">{label}</div>
-            <div class="metric-value-container">
-                <span class="metric-value">{value}</span>
-                <span class="metric-unit">{unit}</span>
-                {delta_html}
-            </div>
-            {subtext_html}
-        </div>
-    """, unsafe_allow_html=True)
+<div class="metric-container">
+    <div class="metric-label">{label}</div>
+    <div class="metric-value-container">
+        <span class="metric-value">{value}</span>
+        <span class="metric-unit">{unit}</span>
+        {delta_html}
+    </div>
+    {subtext_html}
+</div>
+""", unsafe_allow_html=True)
 
 
 # --- App Title ---
