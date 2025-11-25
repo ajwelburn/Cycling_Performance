@@ -1,7 +1,6 @@
 import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
-from scipy.stats import linregress
 
 # --- Custom CSS for metric styling ---
 st.markdown("""
@@ -136,13 +135,21 @@ else:
     x_reg = 1 / t_seconds
     y_reg = powers
 
-    # Perform Linear Regression
-    # slope = W', intercept = CP
-    slope, intercept, r_value, p_value, std_err = linregress(x_reg, y_reg)
+    # Perform Linear Regression using NumPy (removes Scipy dependency)
+    # y = mx + c => Power = W' * (1/t) + CP
+    slope, intercept = np.polyfit(x_reg, y_reg, 1)
     
     W_prime = slope
     CP = intercept
-    r_squared = r_value**2
+
+    # Calculate R-squared manually using correlation coefficient
+    # (Pearson correlation squared is equivalent to R-squared for simple linear regression)
+    if len(x_reg) > 1:
+        correlation_matrix = np.corrcoef(x_reg, y_reg)
+        correlation_xy = correlation_matrix[0, 1]
+        r_squared = correlation_xy**2
+    else:
+        r_squared = 0.0
 
     # --- Derived Metrics ---
     W_prime_kj = W_prime / 1000
@@ -179,7 +186,7 @@ else:
     
     col5, col6, col7 = st.columns(3)
     with col5:
-        # UPDATED: LT1 with range underneath
+        # LT1 with range underneath
         range_text = f"Range: {lt1_lower:.0f} - {lt1_upper:.0f} W"
         custom_metric("Estimated LT1", f"{lt1_est:.0f}", "W", subtext=range_text)
     with col6:
