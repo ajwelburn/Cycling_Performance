@@ -1,149 +1,149 @@
 import streamlit as st
-from fpdf import FPDF
 import datetime
 import urllib.parse
 
-# --- PAGE SETUP & COMPACT MOBILE CSS ---
+# --- PAGE SETUP ---
 st.set_page_config(page_title="Fuel Tracker", page_icon="⚡", layout="centered")
 
+# --- MODERN UI STYLING ---
 st.markdown("""
     <style>
-    /* Main Action Buttons */
     .stButton>button {
         width: 100%;
-        border-radius: 10px;
-        height: 3em;
+        border-radius: 12px;
+        height: 3.5em;
         background-color: #007BFF;
         color: white;
         border: none;
-        font-weight: 600;
-    }
-    /* Compact Counter Badge */
-    .counter-badge {
-        background-color: #007BFF;
-        color: white;
-        padding: 2px 10px;
-        border-radius: 20px;
         font-weight: bold;
-        font-size: 0.9rem;
-        float: right;
     }
-    /* Item Row Styling */
-    .fuel-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 5px 10px;
-        background: #f8f9fa;
+    .report-card {
+        background-color: #ffffff;
+        padding: 20px;
+        border: 2px solid #007BFF;
+        border-radius: 15px;
+        color: #111;
+        font-family: sans-serif;
+        box-shadow: 0px 4px 10px rgba(0,0,0,0.1);
+    }
+    .blue-count {
+        color: #007BFF;
+        font-weight: bold;
+        font-size: 1.1rem;
+    }
+    .weight-row {
+        display: flex; 
+        justify-content: space-between; 
+        background: #f1f3f5; 
+        padding: 10px; 
         border-radius: 8px;
-        margin-bottom: 5px;
-        border: 1px solid #eee;
+        margin: 10px 0;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- TRANSLATIONS ---
+# --- BILINGUAL DICTIONARY ---
 lang = st.radio("Language / Langue", ["EN", "FR"], horizontal=True)
 
 t = {
     "EN": {
-        "title": "Training Fuel Report",
-        "name": "Full Name",
-        "pre": "Pre (kg)",
-        "post": "Post (kg)",
-        "fuel": "Nutrition Intake",
-        "review": "Review & Complete",
-        "total": "Total Carbs",
-        "reset": "Reset",
-        "download": "Download PDF",
+        "title": "Performance Fuel Log",
+        "name_label": "Athlete Name",
+        "pre_label": "Weight Pre (kg)",
+        "post_label": "Weight Post (kg)",
+        "fuel_header": "Fuel Intake (Tap to add)",
+        "review": "✅ Generate Final Report",
+        "total": "Total Carbohydrates",
+        "loss": "Weight Change",
+        "items_consumed": "Items Consumed:",
+        "reset": "Reset Form",
+        "whatsapp": "Share Summary via WhatsApp",
+        "edit_ask": "Do you need to edit/change anything?",
         "items": ["Bar 30g", "Gel 40g", "ISO 30g", "Water 500ml", "Gel 30g", "Chew 35g"]
     },
     "FR": {
-        "title": "Rapport Nutrition",
-        "name": "Nom Complet",
-        "pre": "Avant (kg)",
-        "post": "Apres (kg)",
-        "fuel": "Apport Nutritionnel",
-        "review": "Verifier et Terminer",
+        "title": "Suivi de Nutrition",
+        "name_label": "Nom de l'Athlète",
+        "pre_label": "Poids Avant (kg)",
+        "post_label": "Poids Après (kg)",
+        "fuel_header": "Apport Nutritionnel (Appuyez pour ajouter)",
+        "review": "✅ Générer le Rapport Final",
         "total": "Total Glucides",
-        "reset": "Reinitialiser",
-        "download": "Telecharger PDF",
+        "loss": "Variation de Poids",
+        "items_consumed": "Articles Consommés :",
+        "reset": "Réinitialiser",
+        "whatsapp": "Partager via WhatsApp",
+        "edit_ask": "Souhaitez-vous modifier quelque chose ?",
         "items": ["Barre 30g", "Gel 40g", "ISO 30g", "Eau 500ml", "Gel 30g", "Gomme 35g"]
     }
 }[lang]
 
+# Carb values mapping
 carb_map = {t["items"][0]: 30, t["items"][1]: 40, t["items"][2]: 30, t["items"][3]: 0, t["items"][4]: 30, t["items"][5]: 35}
 
 if 'counters' not in st.session_state:
     st.session_state.counters = {item: 0 for item in t["items"]}
 
-# --- APP UI ---
+# --- APP LAYOUT ---
 st.title("⚡ " + t["title"])
 
-# Compact Weight Inputs
 with st.container(border=True):
-    user_name = st.text_input(t["name"], placeholder="Enter name...")
+    user_name = st.text_input(t["name_label"], placeholder="John Doe")
     c1, c2 = st.columns(2)
-    w_pre = c1.number_input(t["pre"], format="%.1f")
-    w_post = c2.number_input(t["post"], format="%.1f")
+    w_pre = c1.number_input(t["pre_label"], step=0.1, format="%.1f")
+    w_post = c2.number_input(t["post_label"], step=0.1, format="%.1f")
 
-st.subheader(t["fuel"])
-
-# Grid Layout for Buttons
+st.subheader(t["fuel_header"])
 cols = st.columns(2)
 for i, item in enumerate(t["items"]):
     with cols[i % 2]:
-        # Compact Button with Badge
-        count = st.session_state.counters[item]
-        badge_html = f'<span class="counter-badge">{count}</span>' if count > 0 else ''
-        
-        if st.button(f"➕ {item}"):
+        if st.button(f"＋ {item}"):
             st.session_state.counters[item] += 1
             st.rerun()
-            
+        
+        count = st.session_state.counters[item]
         if count > 0:
-            st.markdown(f"Count: **{count}**", unsafe_allow_html=True)
+            st.markdown(f"**{item}:** <span class='blue-count'>{count}</span>", unsafe_allow_html=True)
 
-# --- REPORT GENERATION ---
 st.divider()
-total_carbs = sum(st.session_state.counters[item] * carb_map[item] for item in t["items"])
 
+# --- FINAL REPORT LOGIC ---
+total_carbs = sum(st.session_state.counters[item] * carb_map[item] for item in t["items"])
+weight_loss = round(w_pre - w_post, 2)
+
+st.write(f"### {t['edit_ask']}")
 if st.checkbox(t["review"]):
     if not user_name:
-        st.warning("Please enter a name")
+        st.error("⚠️ Please enter a name / Veuillez entrer un nom.")
     else:
-        # Mini Report Card
-        st.info(f"**{user_name}** | {total_carbs}g Carbs | {round(w_pre - w_post, 2)}kg Loss")
-        
-        # PDF Generation (Fpdf2 compatible)
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("helvetica", 'B', 16)
-        pdf.cell(0, 10, txt=t["title"], ln=True, align='C')
-        pdf.ln(5)
-        pdf.set_font("helvetica", size=12)
-        pdf.cell(0, 8, txt=f"Name: {user_name}", ln=True)
-        pdf.cell(0, 8, txt=f"Date: {datetime.date.today()}", ln=True)
-        pdf.cell(0, 8, txt=f"Weight: {w_pre}kg -> {w_post}kg", ln=True)
-        pdf.ln(5)
-        
-        for item, count in st.session_state.counters.items():
-            if count > 0:
-                pdf.cell(0, 8, txt=f"- {item}: {count}", ln=True)
-        
-        pdf.ln(5)
-        pdf.set_font("helvetica", 'B', 14)
-        pdf.cell(0, 10, txt=f"TOTAL: {total_carbs}g Carbs", ln=True)
-        
-        pdf_bytes = pdf.output()
+        # Visual Summary Card (Screenshot Ready)
+        st.markdown(f"""
+            <div class="report-card">
+                <h2 style='text-align:center; color:#007BFF; margin-top:0;'>{t['title']}</h2>
+                <p><b>{t['name_label']}:</b> {user_name}</p>
+                <p><b>Date:</b> {datetime.date.today()}</p>
+                <hr>
+                <div class="weight-row">
+                    <span><b>{t['pre_label']}:</b> {w_pre} kg</span>
+                    <span><b>{t['post_label']}:</b> {w_post} kg</span>
+                </div>
+                <p style="font-size: 1.1rem; text-align:center;"><b>{t['loss']}: {weight_loss} kg</b></p>
+                <hr>
+                <p><b>{t['items_consumed']}</b></p>
+                <ul style="list-style-type: none; padding-left: 0;">
+                {"".join([f"<li>✅ {count}x {item}</li>" for item, count in st.session_state.counters.items() if count > 0])}
+                </ul>
+                <hr>
+                <h3 style='text-align:center;'>{t['total']}: {total_carbs}g</h3>
+            </div>
+        """, unsafe_allow_html=True)
 
-        # Action Buttons
-        st.download_button(t["download"], data=pdf_bytes, file_name=f"{user_name}_Fuel.pdf", mime="application/pdf")
-        
-        msg = f"Report: {user_name}\nCarbs: {total_carbs}g\nWeight: {w_pre}kg to {w_post}kg"
+        # WhatsApp sharing 
+        msg = f"*{t['title']}*\n{t['name_label']}: {user_name}\n{t['pre_label']}: {w_pre}kg\n{t['post_label']}: {w_post}kg\n{t['loss']}: {weight_loss}kg\n{t['total']}: {total_carbs}g"
         wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
-        st.markdown(f'<a href="{wa_url}" target="_blank"><button style="width:100%; border-radius:10px; height:3em; background-color:#25D366; color:white; border:none; font-weight:bold; margin-top:10px;">Send to Coach (WhatsApp)</button></a>', unsafe_allow_html=True)
+        st.markdown(f'<a href="{wa_url}" target="_blank"><button style="width:100%; border-radius:12px; height:3.5em; background-color:#25D366; color:white; border:none; font-weight:bold; margin-top:10px;">{t["whatsapp"]}</button></a>', unsafe_allow_html=True)
 
 if st.button(t["reset"]):
-    st.session_state.counters = {item: 0 for item in t["items"]}
+    for item in t["items"]:
+        st.session_state.counters[item] = 0
     st.rerun()
