@@ -5,30 +5,41 @@ import urllib.parse
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Fuel Tracker", page_icon="⚡", layout="centered")
 
-# --- MOBILE CSS ---
+# --- REFINED MOBILE CSS ---
 st.markdown("""
     <style>
     /* Main Action Buttons */
     div.stButton > button {
         width: 100%;
-        border-radius: 12px;
-        height: 3.8em;
+        border-radius: 12px 12px 0px 0px; /* Rounded top only */
+        height: 3.5em;
         background-color: #007BFF;
         color: white;
         font-weight: bold;
         border: none;
-        font-size: 16px;
-        box-shadow: 0px 2px 4px rgba(0,0,0,0.1);
+        font-size: 14px;
+        transition: 0.1s;
     }
-    /* Neat Green Number Badge */
-    .counter-badge {
+    div.stButton > button:active {
+        background-color: #0056b3;
+        transform: scale(0.98);
+    }
+    /* Number Badge Attached to Button */
+    .counter-holder {
+        background-color: #1E1E1E; /* Dark background for contrast */
+        border: 1px solid #007BFF;
+        border-top: none;
+        border-radius: 0px 0px 12px 12px; /* Rounded bottom only */
         text-align: center;
+        padding: 5px 0;
+        margin-top: -16px; /* Pulls it up to touch the button */
+        margin-bottom: 15px;
+    }
+    .counter-value {
         font-weight: 900;
-        color: #28a745; /* Clean Green */
-        font-size: 1.6rem;
-        margin-top: -8px;
-        margin-bottom: 12px;
-        font-family: 'Courier New', monospace;
+        color: #28a745; /* Neon Green */
+        font-size: 1.4rem;
+        font-family: monospace;
     }
     .report-card {
         background-color: #ffffff;
@@ -46,7 +57,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- STABLE DATA KEYS ---
+# --- DATA STRUCTURE ---
 FUEL_DATA = {
     "item_1": {"EN": "Bar 30g", "FR": "Barre 30g", "carbs": 30, "fluid": 0, "type": "solid"},
     "item_2": {"EN": "Gel 40g", "FR": "Gel 40g", "carbs": 40, "fluid": 0, "type": "solid"},
@@ -110,18 +121,22 @@ st.subheader(t["fuel"])
 cols = st.columns(2)
 for i, key in enumerate(FUEL_DATA.keys()):
     with cols[i % 2]:
+        # The Button
         if st.button(FUEL_DATA[key][lang], key=key):
             st.session_state.counters[key] += 1
             st.rerun()
         
+        # The Attached Counter Badge
         count = st.session_state.counters[key]
-        # Only show the green number
-        display_val = count if count > 0 else "0"
-        st.markdown(f"<div class='counter-badge'>{display_val}</div>", unsafe_allow_html=True)
+        st.markdown(f"""
+            <div class="counter-holder">
+                <span class="counter-value">{count}</span>
+            </div>
+        """, unsafe_allow_html=True)
 
 st.divider()
 
-# --- FINAL TOTALS ---
+# --- CALCULATIONS ---
 solid_cho = sum(st.session_state.counters[k] * FUEL_DATA[k]["carbs"] for k in FUEL_DATA if FUEL_DATA[k]["type"] == "solid")
 fluid_cho = sum(st.session_state.counters[k] * FUEL_DATA[k]["carbs"] for k in FUEL_DATA if FUEL_DATA[k]["type"] == "fluid")
 total_cho = solid_cho + fluid_cho
@@ -146,12 +161,11 @@ if st.checkbox(t["review"]):
             </div>
         """, unsafe_allow_html=True)
 
-        msg = f"*{t['title']}*\n{user_name}\nLoss: {weight_loss}kg\nCHO: {total_cho}g ({solid_cho}s/{fluid_cho}f)\nFluid: {total_ml}ml"
+        msg = f"*{t['title']}*\n{user_name}\nLoss: {weight_loss}kg\nCHO: {total_cho}g\nFluid: {total_ml}ml"
         wa_url = f"https://wa.me/?text={urllib.parse.quote(msg)}"
         st.markdown(f'<a href="{wa_url}" target="_blank"><button style="width:100%; border-radius:12px; height:3.5em; background-color:#25D366; color:white; border:none; font-weight:bold; margin-top:10px;">{t["whatsapp"]}</button></a>', unsafe_allow_html=True)
-    else:
-        st.error("Please enter a name / Entrez un nom")
 
 if st.button(t["reset"]):
     for k in st.session_state.counters: st.session_state.counters[k] = 0
     st.rerun()
+    
