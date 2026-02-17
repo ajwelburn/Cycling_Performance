@@ -33,9 +33,9 @@ st.markdown("""
         background-color: #444C56;
     }
 
-    /* Analyze Button - The only Red element */
+    /* Analyze Button - Now Performance Blue */
     .stButton > button[kind="secondary"] {
-        background-color: #E34C26 !important; 
+        background-color: #007BFF !important; 
         color: white !important;
         border-radius: 12px !important;
         height: 3.5em !important;
@@ -43,6 +43,7 @@ st.markdown("""
         font-weight: 800 !important;
         border: none !important;
         margin-top: 15px;
+        box-shadow: 0px 4px 10px rgba(0, 123, 255, 0.3);
     }
 
     /* Counter Tray with Electric Blue Accent */
@@ -54,7 +55,7 @@ st.markdown("""
     }
     .counter-num {
         font-weight: 900;
-        color: #3FB950; /* Neon Green */
+        color: #3FB950; /* Neon Green stays for success/positive feedback */
         font-size: 1.4rem;
         font-family: 'Courier New', monospace;
     }
@@ -65,7 +66,7 @@ st.markdown("""
         padding: 20px;
         border-radius: 12px;
         color: #111;
-        border-left: 8px solid #E34C26;
+        border-left: 8px solid #007BFF; /* Performance Blue Edge */
     }
     </style>
     """, unsafe_allow_html=True)
@@ -122,7 +123,7 @@ for i, key in enumerate(FUEL_DATA.keys()):
         count = st.session_state.counters[key]
         st.markdown(f'<div class="counter-tray"><span class="counter-num">{count}</span></div></div>', unsafe_allow_html=True)
 
-# Main Analyze Button
+# Main Analyze Button (Now Blue)
 if st.button(t["analyze"], type="secondary", use_container_width=True):
     st.session_state.show_report = True
 
@@ -148,7 +149,7 @@ if st.session_state.show_report:
                 <span>{t['s_cho']}: <b>{solid_cho}g</b></span>
                 <span>{t['f_cho']}: <b>{fluid_cho}g</b></span>
             </div>
-            <h1 style='color:#E34C26; margin:10px 0;'>{total_cho}g CHO</h1>
+            <h1 style='color:#007BFF; margin:10px 0;'>{total_cho}g CHO</h1>
             <p>{t['t_flu']}: <b>{total_ml}mL</b></p>
         </div>
     """, unsafe_allow_html=True)
