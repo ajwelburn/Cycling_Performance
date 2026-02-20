@@ -10,3 +10,4 @@ streamlit-folium
 fpdf2
 kaleido
 tabulate
+fitparse
