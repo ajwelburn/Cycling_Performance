@@ -2,299 +2,195 @@ import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
 
-# --- Custom CSS for metric styling ---
+# --- Page Config & Modern Styling ---
+st.set_page_config(page_title="W' & CP Analytics", layout="wide")
+
 st.markdown("""
 <style>
-.metric-container {
-    display: flex;
-    flex-direction: column;
-    padding: 10px;
-    border: 1px solid #ddd;
-    border-radius: 5px;
-    margin-bottom: 10px;
-    background-color: #fafafa;
-}
-.metric-label {
-    font-size: 0.9rem;
-    color: #808495;
-    margin-bottom: 2px;
-}
-.metric-value-container {
-    display: flex;
-    align-items: baseline;
-}
-.metric-value {
-    font-size: 1.75rem;
-    font-weight: bold;
-    color: #31333F;
-}
-.metric-unit {
-    font-size: 1rem;
-    margin-left: 0.3rem;
-    color: #555;
-}
-.metric-delta {
-    font-size: 0.9rem;
-    margin-left: 0.5rem;
-}
-.metric-subtext {
-    font-size: 0.85rem;
-    color: #666;
-    margin-top: 2px;
-    font-style: italic;
-}
+    /* Modern Background and Font */
+    .stApp {
+        background-color: #f8f9fa;
+    }
+    
+    /* Modernized Metric Containers */
+    .metric-container {
+        display: flex;
+        flex-direction: column;
+        padding: 20px;
+        border: none;
+        border-radius: 12px;
+        margin-bottom: 10px;
+        background-color: white;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        transition: transform 0.2s;
+    }
+    .metric-container:hover {
+        transform: translateY(-2px);
+    }
+    .metric-label {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .metric-value-container {
+        display: flex;
+        align-items: baseline;
+        margin-top: 5px;
+    }
+    .metric-value {
+        font-size: 2rem;
+        font-weight: 800;
+        color: #1e293b;
+    }
+    .metric-unit {
+        font-size: 1rem;
+        margin-left: 5px;
+        color: #94a3b8;
+    }
+    .metric-subtext {
+        font-size: 0.8rem;
+        color: #64748b;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid #f1f5f9;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-
-# --- Helper function to create custom metric with optional subtext ---
-def custom_metric(label, value, unit, delta=None, delta_unit="", subtext=None):
-    delta_html = ""
-    if delta is not None:
-        delta_color = "green" if delta >= 0 else "red"
-        delta_sign = "+" if delta >= 0 else ""
-        delta_html = f'<span class="metric-delta" style="color: {delta_color};">{delta_sign}{delta:.1f}{delta_unit}</span>'
-    
-    subtext_html = ""
-    if subtext:
-        subtext_html = f'<div class="metric-subtext">{subtext}</div>'
-
-    # Combine into a single line to prevent Streamlit/Markdown from misinterpreting indentation as code blocks
-    html_str = f'<div class="metric-container"><div class="metric-label">{label}</div><div class="metric-value-container"><span class="metric-value">{value}</span><span class="metric-unit">{unit}</span>{delta_html}</div>{subtext_html}</div>'
-
+def custom_metric(label, value, unit, subtext=None):
+    subtext_html = f'<div class="metric-subtext">{subtext}</div>' if subtext else ""
+    html_str = f"""
+    <div class="metric-container">
+        <div class="metric-label">{label}</div>
+        <div class="metric-value-container">
+            <span class="metric-value">{value}</span>
+            <span class="metric-unit">{unit}</span>
+        </div>
+        {subtext_html}
+    </div>
+    """
     st.markdown(html_str, unsafe_allow_html=True)
 
+# --- Sidebar Inputs ---
+with st.sidebar:
+    st.header("⚡ Input Parameters")
+    p3 = st.number_input("3-Min Power (W)", 0, 2000, 350)
+    p5 = st.number_input("5-Min Power (W)", 0, 2000, 0)
+    p12 = st.number_input("12-Min Power (W)", 0, 2000, 300)
+    p15 = st.number_input("15-Min Power (W)", 0, 2000, 0)
+    weight = st.number_input("Body Weight (kg)", 30.0, 200.0, 75.0)
+    
+    st.markdown("---")
+    st.caption("Developed for High-Performance Analytics")
 
-# --- App Title ---
-st.title("⚡ Multi-Point CP & W' Calculator")
-st.markdown("""
-Enter your maximal power for 3, 5, 12, or 15 minutes. 
-**You must provide at least two durations** for the calculation to work. 
-Set a value to **0** to exclude it from the calculation.
-""")
-
-# --- Sidebar for User Inputs ---
-st.sidebar.header("User Inputs")
-
-# Using 0 as default for optional fields so logic implies "not used"
-p3 = st.sidebar.number_input("3-Minute Power (W)", min_value=0, max_value=2000, value=350, step=1)
-p5 = st.sidebar.number_input("5-Minute Power (W)", min_value=0, max_value=2000, value=0, step=1)
-p12 = st.sidebar.number_input("12-Minute Power (W)", min_value=0, max_value=2000, value=300, step=1)
-p15 = st.sidebar.number_input("15-Minute Power (W)", min_value=0, max_value=2000, value=0, step=1)
-weight = st.sidebar.number_input("Weight (kg)", min_value=30.0, max_value=200.0, value=70.0, step=0.1)
-
-# --- Data Preparation Logic ---
-# 1. Aggregate inputs into lists
+# --- Logic & Calculations ---
 raw_data = [
     {"duration": 180, "power": p3, "label": "3-min"},
     {"duration": 300, "power": p5, "label": "5-min"},
     {"duration": 720, "power": p12, "label": "12-min"},
     {"duration": 900, "power": p15, "label": "15-min"}
 ]
-
-# 2. Filter out valid inputs (Power > 0)
 valid_data = [d for d in raw_data if d["power"] > 0]
 
-# 3. Validation Flag
-is_valid = True
-error_msg = ""
-
 if len(valid_data) < 2:
-    is_valid = False
-    error_msg = "Please enter power values for at least two different durations."
+    st.warning("Please enter at least two power values in the sidebar to generate the model.")
 else:
-    # Sort by duration to check for logical consistency (shorter duration should have higher power)
-    valid_data.sort(key=lambda x: x["duration"])
-    
-    # Check that power decreases as duration increases
-    for i in range(len(valid_data) - 1):
-        if valid_data[i]["power"] <= valid_data[i+1]["power"]:
-            is_valid = False
-            error_msg = f"Data Error: {valid_data[i]['label']} power must be higher than {valid_data[i+1]['label']} power."
-            break
-
-# --- Calculation & Display ---
-if not is_valid:
-    st.error(f"⚠️ {error_msg}")
-else:
-    # Extract arrays for calculation
-    # Model: Power = W' * (1/time) + CP
-    # y = mx + c  ->  Power = W' * (1/t) + CP
-    
+    # Regression
     t_seconds = np.array([d["duration"] for d in valid_data])
     powers = np.array([d["power"] for d in valid_data])
-    
-    # x axis for regression is 1/time
-    x_reg = 1 / t_seconds
-    y_reg = powers
-
-    # Perform Linear Regression using NumPy (removes Scipy dependency)
-    # y = mx + c => Power = W' * (1/t) + CP
-    slope, intercept = np.polyfit(x_reg, y_reg, 1)
+    slope, intercept = np.polyfit(1/t_seconds, powers, 1)
     
     W_prime = slope
     CP = intercept
-
-    # Calculate R-squared manually using correlation coefficient
-    # (Pearson correlation squared is equivalent to R-squared for simple linear regression)
-    if len(x_reg) > 1:
-        correlation_matrix = np.corrcoef(x_reg, y_reg)
-        correlation_xy = correlation_matrix[0, 1]
-        r_squared = correlation_xy**2
-    else:
-        r_squared = 0.0
-
-    # --- Derived Metrics ---
-    W_prime_kj = W_prime / 1000
-    cp_w_kg = CP / weight
-    w_prime_j_kg = W_prime / weight
     
-    # Estimate LT1 and its range
-    lt1_est = (0.8572 * CP) - 30.45
-    lt1_lower = lt1_est * 0.91
-    lt1_upper = lt1_est * 1.09
-    
-    # Predict VO2max using the new MAP formula
-    MAP = (W_prime / 220) + CP
-    vo2max_l_min = (0.01095 * MAP) + 0.02388
-    vo2max_ml_kg_min = (vo2max_l_min * 1000) / weight
+    # Hero Metrics
+    st.title("Performance Profile")
+    m1, m2, m3, m4 = st.columns(4)
+    with m1: custom_metric("Critical Power", f"{CP:.0f}", "W", f"{(CP/weight):.2f} W/kg")
+    with m2: custom_metric("W' Capacity", f"{(W_prime/1000):.1f}", "kJ", f"{(W_prime/weight):.0f} J/kg")
+    with m3: custom_metric("Est. LT1", f"{(0.85*CP-30):.0f}", "W", "Zone 2 Upper Bound")
+    with m4: custom_metric("VO2Max Est.", f"{((0.011*((W_prime/220)+CP)+0.024)*1000/weight):.1f}", "ml/kg")
 
-    # --- Display Results in Data Boxes ---
-    st.header("📈 Your Calculated Metrics")
-    
-    # Show how many points were used and the fit quality
-    st.caption(f"Calculated using {len(valid_data)} data points. Model Fit (R²): {r_squared:.4f}")
-
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        custom_metric("Critical Power (CP)", f"{CP:.0f}", "W")
-    with col2:
-        custom_metric("W' (Work Capacity)", f"{W_prime_kj:.1f}", "kJ")
-    with col3:
-        custom_metric("CP (Relative)", f"{cp_w_kg:.2f}", "W/kg")
-    with col4:
-        custom_metric("W' (Relative)", f"{w_prime_j_kg:.1f}", "J/kg")
-
-    st.markdown("---") # Visual separator
-    
-    col5, col6, col7 = st.columns(3)
-    with col5:
-        # LT1 with range underneath
-        range_text = f"Range: {lt1_lower:.0f} - {lt1_upper:.0f} W"
-        custom_metric("Estimated LT1", f"{lt1_est:.0f}", "W", subtext=range_text)
-    with col6:
-        custom_metric("Predicted VO₂max (abs)", f"{vo2max_l_min:.2f}", "L/min")
-    with col7:
-        custom_metric("Predicted VO₂max (rel)", f"{vo2max_ml_kg_min:.1f}", "ml/min/kg")
-
-
-    # --- Power-Duration Curve ---
-    st.header("📊 Your Power-Duration Curve")
-    
-    # Generate time data from 20s to 1200s (20 mins) for the curve
-    time_curve = np.arange(20, 1201)
+    # --- Plotly Power-Duration Curve with Gradient ---
+    st.subheader("Power-Duration Curve")
+    time_curve = np.arange(20, 1500, 2)
     power_curve = (W_prime / time_curve) + CP
 
-    # Create the plot with Plotly
-    fig_pd = go.Figure()
+    fig = go.Figure()
 
-    # Add the CP line first (for shading reference)
-    fig_pd.add_trace(go.Scatter(
-        x=time_curve,
-        y=[CP] * len(time_curve),
-        mode='lines',
-        name='Critical Power (CP)',
-        line=dict(color='grey', dash='dot', width=2)
-    ))
-
-    # Add the main power curve with shading
-    fig_pd.add_trace(go.Scatter(
-        x=time_curve, 
-        y=power_curve, 
-        mode='lines', 
-        name='Model Curve',
-        line=dict(color='#007ACC', width=3),
-        fill='tonexty', 
-        fillcolor='rgba(255, 182, 193, 0.3)' 
-    ))
-
-    # Add markers for the input powers (Dynamic based on valid_data)
-    for point in valid_data:
-        fig_pd.add_trace(go.Scatter(
-            x=[point["duration"]], 
-            y=[point["power"]], 
-            mode='markers', 
-            name=f'{point["label"]} ({point["power"]}W)',
-            marker=dict(size=10, symbol='circle', line=dict(width=2, color='DarkSlateGrey'))
+    # 1. Simulate Gradient Fill (Stacking layers)
+    # We create 10 layers of the fill area with decreasing opacity
+    num_steps = 12
+    for i in range(num_steps):
+        opacity = (i + 1) / num_steps * 0.15  # Increases as it goes down
+        # Each layer fills a portion of the Y axis to simulate the fade
+        fig.add_trace(go.Scatter(
+            x=time_curve,
+            y=power_curve,
+            fill='tozeroy',
+            fillcolor=f'rgba(0, 122, 255, {opacity/2})',
+            line=dict(color='rgba(0,0,0,0)'),
+            showlegend=False,
+            hoverinfo='skip'
         ))
 
-    # Update layout
-    fig_pd.update_layout(
-        title="", 
-        xaxis_title="Time (s)",
-        yaxis_title="Power (W)",
-        template="simple_white", 
-        xaxis_range=[0, 1250], 
-        yaxis_range=[100, max(power_curve) + 50],  
-        font=dict(color="black", family="Arial, sans-serif"),
-        legend=dict(
-            yanchor="top",
-            y=0.98,
-            xanchor="right",
-            x=0.98,
-            bgcolor="rgba(255,255,255,0.6)"
-        )
+    # 2. Add main Curve Line
+    fig.add_trace(go.Scatter(
+        x=time_curve, y=power_curve,
+        name="Model Curve",
+        line=dict(color='#007AFF', width=4)
+    ))
+
+    # 3. Add Critical Power baseline
+    fig.add_hline(y=CP, line_dash="dot", line_color="#94a3b8", 
+                 annotation_text="CP Baseline", annotation_position="bottom right")
+
+    # 4. Add User Data Points
+    fig.add_trace(go.Scatter(
+        x=[d["duration"] for d in valid_data],
+        y=[d["power"] for d in valid_data],
+        mode='markers',
+        marker=dict(size=12, color='#1e293b', line=dict(width=2, color='white')),
+        name="Field Tests"
+    ))
+
+    fig.update_layout(
+        template="plotly_white",
+        hovermode="x unified",
+        margin=dict(l=20, r=20, t=20, b=20),
+        xaxis=dict(title="Duration (seconds)", showgrid=False),
+        yaxis=dict(title="Power (Watts)", showgrid=True, gridcolor="#f1f5f9"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # --- New Feature: W' Target Calculator ---
+    st.markdown("---")
+    st.header("🎯 Target Intent Calculator")
+    st.markdown("Calculate exactly how much power you need to hold to deplete a specific % of your W' over a set duration.")
     
-    fig_pd.update_xaxes(showline=True, linewidth=1, linecolor='black', ticks='inside')
-    fig_pd.update_yaxes(showline=True, linewidth=1, linecolor='black', ticks='inside')
-
-    st.plotly_chart(fig_pd, use_container_width=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        w_percent = st.slider("Target W' Depletion (%)", 10, 100, 80)
+        target_duration_min = st.number_input("Target Duration (minutes)", 1.0, 60.0, 5.0)
     
-    # --- Linear Power vs. 1/Time Graph ---
-    with st.expander("Show Linear Regression Model (Power vs. 1/Time)"):
-        fig_linear = go.Figure()
-
-        # Add the test points used
-        fig_linear.add_trace(go.Scatter(
-            x=x_reg,
-            y=y_reg,
-            mode='markers',
-            name='User Inputs',
-            marker=dict(color='red', size=12)
-        ))
-
-        # Add the regression line
-        # Create 2 points to draw the line (0 and max 1/t)
-        x_line = np.array([0, max(x_reg) * 1.1])
-        y_line = W_prime * x_line + CP
+    with c2:
+        # Math: Power = (W'_used / time) + CP
+        target_seconds = target_duration_min * 60
+        w_used = (w_percent / 100) * W_prime
+        target_power = (w_used / target_seconds) + CP
         
-        fig_linear.add_trace(go.Scatter(
-            x=x_line,
-            y=y_line,
-            mode='lines',
-            name='Linear Fit',
-            line=dict(color='blue', dash='dash')
-        ))
-        
-        fig_linear.update_layout(
-            title="Linear Regression: Power vs. 1/Time",
-            xaxis_title="1 / Time (s⁻¹)",
-            yaxis_title="Power (W)",
-            template="plotly_white",
-            font=dict(color="black")
+        st.write("##") # Spacer
+        custom_metric(
+            f"Target Power for {target_duration_min}m", 
+            f"{target_power:.0f}", "Watts", 
+            subtext=f"Uses {w_percent}% of your total {W_prime/1000:.1f}kJ capacity"
         )
-        fig_linear.update_xaxes(showline=True, linewidth=2, linecolor='black', ticks='inside', showgrid=False)
-        fig_linear.update_yaxes(showline=True, linewidth=2, linecolor='black', ticks='inside', showgrid=False)
-        
-        st.plotly_chart(fig_linear, use_container_width=True)
-        st.markdown(f"**Slope (W')**: {W_prime_kj:.1f} kJ | **Intercept (CP)**: {CP:.1f} W")
 
-    # --- Maximal Sustainable Power Calculator ---
-    with st.expander("Calculate Predicted Max Power for Custom Duration"):
-        duration_input_min = st.number_input("Enter duration (minutes)", min_value=1, max_value=120, value=20, step=1, key="msp_input")
-        
-        duration_input_sec = duration_input_min * 60
-        msp = (W_prime / duration_input_sec) + CP
-        
-        custom_metric(f"Predicted Power for {duration_input_min} min", f"{msp:.0f}", "W")
+    # --- Cleanup UI Footer ---
+    with st.expander("Model Technical Details"):
+        st.write(f"**Regression Slope:** {W_prime:.2f} (W')")
+        st.write(f"**Regression Intercept:** {CP:.2f} (CP)")
+        st.write("This model uses the linear $P = W' \cdot (1/t) + CP$ relationship.")
