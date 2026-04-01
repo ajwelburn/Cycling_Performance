@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 # --- Page Config ---
 st.set_page_config(page_title="Elite CP & W' Analytics", layout="wide")
 
-# --- Refined CSS ---
+# --- Custom CSS ---
 st.markdown("""
 <style>
 .metric-container {
@@ -76,7 +76,7 @@ with st.sidebar:
     weight = st.number_input("Weight (kg)", 30.0, 200.0, 70.0)
 
 # --- Logic ---
-CP, W_prime = 0, 0
+CP, W_prime, r_squared = 0, 0, 0
 valid_data = []
 
 if input_mode == "Effort Based":
@@ -87,12 +87,14 @@ if input_mode == "Effort Based":
     if len(valid_data) >= 2:
         t_sec = np.array([d["d"] for d in valid_data])
         p_vals = np.array([d["p"] for d in valid_data])
-        slope, intercept = np.polyfit(1/t_sec, p_vals, 1)
+        x_reg = 1/t_sec
+        slope, intercept = np.polyfit(x_reg, p_vals, 1)
         W_prime, CP = slope, intercept
+        r_squared = np.corrcoef(x_reg, p_vals)[0, 1]**2
 else:
     CP, W_prime = m_cp, m_w * 1000
 
-# --- Display ---
+# --- Main App ---
 if input_mode == "Effort Based" and len(valid_data) < 2:
     st.info("Please enter at least two power values.")
 else:
@@ -105,21 +107,34 @@ else:
     with c1: custom_metric("Critical Power", f"{CP:.0f}", "W", f"{(CP/weight):.2f} W/kg")
     with c2: custom_metric("W' Capacity", f"{(W_prime/1000):.1f}", "kJ", f"{(W_prime/weight):.0f} J/kg")
     with c3: custom_metric("Est. LT1", f"{lt1:.0f}", "W", f"Range: {lt1*0.91:.0f}-{lt1*1.09:.0f} W")
-    with c4: custom_metric(r"$VO_2 \text{ Max}$", f"{vo2_rel:.1f}", "ml/kg/min")
+    with c4: 
+        # Using HTML <sub> for the 2 to avoid dollar signs
+        vo2_label = "VO<sub>2</sub> Max"
+        custom_metric(vo2_label, f"{vo2_rel:.1f}", "ml/kg/min")
 
-    # Gradient Chart
+    # --- Power-Duration Curve with Gradient & Data Points ---
     st.header("📊 Power-Duration Profile")
-    t_curve = np.arange(20, 1201, 2)
+    t_curve = np.arange(20, 1501, 5)
     p_curve = (W_prime / t_curve) + CP
     fig = go.Figure()
 
-    # Opacity Layers
-    for i in range(1, 12):
+    # Gradient Layers
+    for i in range(1, 13):
         fig.add_trace(go.Scatter(x=t_curve, y=p_curve, fill='tozeroy', 
                                  fillcolor=f'rgba(0, 122, 204, {i*0.01})', 
-                                 line=dict(color='rgba(0,0,0,0)'), showlegend=False))
+                                 line=dict(color='rgba(0,0,0,0)'), showlegend=False, hoverinfo='skip'))
 
-    fig.add_trace(go.Scatter(x=t_curve, y=p_curve, line=dict(color='#007ACC', width=4), name="Curve"))
+    fig.add_trace(go.Scatter(x=t_curve, y=p_curve, line=dict(color='#007ACC', width=4), name="Model Curve"))
+
+    # RESTORED: Data Points
+    if input_mode == "Effort Based":
+        fig.add_trace(go.Scatter(
+            x=[d["d"] for d in valid_data], 
+            y=[d["p"] for d in valid_data],
+            mode='markers', name="Efforts", 
+            marker=dict(size=12, color='#1e293b', line=dict(width=2, color='white'))
+        ))
+
     fig.update_layout(template="simple_white", xaxis_title="Time (s)", yaxis_title="Power (W)")
     st.plotly_chart(fig, use_container_width=True)
 
@@ -132,16 +147,29 @@ else:
     with p3:
         w_used_kj = (w_perc / 100) * (W_prime / 1000)
         p_req = ((w_perc/100 * W_prime) / (target_min * 60)) + CP
-        # Subtext formatted exactly as requested
-        custom_metric("Required Power", f"{p_req:.0f}", "W", f"Total $W'$ used: {w_used_kj:.1f} kJ")
+        # FIXED: Removed dollar signs, used plain text
+        custom_metric("Required Power", f"{p_req:.0f}", "W", f"Total W' used: {w_used_kj:.1f} kJ")
 
-    # --- Other Original Features ---
-    with st.expander("Additional Tools (TTE & Regression)"):
-        ta, tb = st.columns(2)
-        with ta:
-            tte_p = st.number_input("Calculate TTE for Power (W)", int(CP+1), 2000, int(CP+50))
-            tte_s = W_prime / (tte_p - CP)
-            st.write(f"**Predicted TTE:** {int(tte_s // 60)}m {int(tte_s % 60)}s")
-        with tb:
-            if input_mode == "Effort Based":
-                st.write("**Model Accuracy:** Linear Regression of Power vs 1/t")
+    # --- RESTORED: TTE & Linear Graph ---
+    st.markdown("---")
+    col_left, col_right = st.columns(2)
+    
+    with col_left:
+        st.subheader("⏱️ TTE Calculator")
+        tte_p = st.number_input("Enter Target Power (W)", int(CP+5), 2000, int(CP+50))
+        tte_sec = W_prime / (tte_p - CP)
+        st.info(f"**Predicted Time to Exhaustion:** {int(tte_sec // 60)}m {int(tte_sec % 60)}s")
+
+    with col_right:
+        st.subheader("📈 Linear Regression")
+        if input_mode == "Effort Based":
+            fig_lin = go.Figure()
+            xr = 1/np.array([d["d"] for d in valid_data])
+            yr = [d["p"] for d in valid_data]
+            fig_lin.add_trace(go.Scatter(x=xr, y=yr, mode='markers', name="Actual"))
+            fig_lin.add_trace(go.Scatter(x=[0, max(xr)*1.1], y=[CP, W_prime*(max(xr)*1.1)+CP], mode='lines', name="Fit"))
+            fig_lin.update_layout(template="plotly_white", xaxis_title="1/Time", yaxis_title="Power", height=300)
+            st.plotly_chart(fig_lin, use_container_width=True)
+            st.caption(f"Model Fit (R²): {r_squared:.4f}")
+        else:
+            st.write("Regression data is available in 'Effort Based' mode.")
