@@ -138,16 +138,29 @@ hr{border:none;border-top:1px solid #E2DDD1;margin:0}
   color:rgba(255,255,255,.45);margin-top:6px;font-weight:700}
 
 /* SEND */
-.send-wrap{margin:12px 12px 0;display:flex;gap:8px}
-.wa-btn{flex:1;background:#25D366;color:#063d1c;border-radius:12px;
-  padding:16px;text-align:center;font-weight:800;font-size:15px;
-  cursor:pointer;text-decoration:none;display:block;
-  box-shadow:0 3px 10px rgba(37,211,102,.3)}
-.copy-btn{flex:1;background:#E5343A;color:#fff;border-radius:12px;
-  padding:16px;text-align:center;font-weight:800;font-size:15px;cursor:pointer}
-.reset-lnk{display:block;text-align:center;padding:12px;
-  color:#B11F26;font-size:13px;font-weight:700;cursor:pointer;
-  text-decoration:underline}
+.send-wrap{margin:16px 12px 0;display:flex;gap:8px}
+.wa-btn{flex:1;background:#25D366;color:#063d1c;border-radius:14px;
+  padding:17px 8px;text-align:center;font-weight:800;font-size:15px;
+  cursor:pointer;user-select:none;
+  box-shadow:0 4px 14px rgba(37,211,102,.35);
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  transition:.15s}
+.wa-btn:active{transform:scale(.97);box-shadow:0 2px 6px rgba(37,211,102,.2)}
+.copy-btn{flex:1;background:#2F3C82;color:#fff;border-radius:14px;
+  padding:17px 8px;text-align:center;font-weight:800;font-size:15px;
+  cursor:pointer;user-select:none;
+  box-shadow:0 4px 14px rgba(47,60,130,.3);
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  transition:.15s}
+.copy-btn:active{transform:scale(.97)}
+.reset-wrap{margin:10px 12px 4px;display:flex;align-items:center;
+  background:#fff;border:1.5px solid #E2DDD1;border-radius:12px;
+  overflow:hidden}
+.reset-btn{flex:1;display:flex;align-items:center;justify-content:center;
+  gap:8px;padding:14px;cursor:pointer;user-select:none;
+  font-weight:700;font-size:14px;color:#B11F26;transition:.12s}
+.reset-btn:active{background:#FFF5F5}
+.reset-divider{width:1px;background:#E2DDD1;align-self:stretch}
 
 /* TOAST */
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
@@ -162,8 +175,23 @@ hr{border:none;border-top:1px solid #E2DDD1;margin:0}
 <div class="hdr">
   <div class="stripe"></div>
   <div class="hdr-inner">
-    <div class="hdr-title">RIDE<span>·</span>LOG</div>
-    <p class="hdr-sub">Fill in after each stage · tap Send when done</p>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+      <div>
+        <div class="hdr-title">RIDE<span>·</span>LOG</div>
+        <p class="hdr-sub">Fill in after each stage · tap Send when done</p>
+      </div>
+      <div onclick="resetStage()" style="flex-shrink:0;margin-top:4px;
+           background:rgba(255,255,255,.15);border:1.5px solid rgba(255,255,255,.35);
+           border-radius:10px;padding:9px 13px;cursor:pointer;
+           font-size:12px;font-weight:700;color:#fff;white-space:nowrap;
+           display:flex;align-items:center;gap:5px;backdrop-filter:blur(4px);
+           transition:.12s" onmouseover="this.style.background='rgba(255,255,255,.25)'"
+           onmouseout="this.style.background='rgba(255,255,255,.15)'"
+           onmousedown="this.style.transform='scale(.94)'"
+           onmouseup="this.style.transform='scale(1)'">
+        🔄 Reset
+      </div>
+    </div>
   </div>
 </div>
 
@@ -303,7 +331,12 @@ hr{border:none;border-top:1px solid #E2DDD1;margin:0}
   <div class="wa-btn" onclick="openWhatsApp()">📱 WhatsApp</div>
   <div class="copy-btn" onclick="copyReport()">📋 Copy</div>
 </div>
-<div class="reset-lnk" onclick="resetStage()">🔄 Reset this stage</div>
+<div class="reset-wrap">
+  <div class="reset-btn" onclick="resetStage()">
+    <span style="font-size:18px">🔄</span>
+    <span>Reset Stage <span id="resetStageNum">1</span></span>
+  </div>
+</div>
 
 <div class="toast" id="toast">Copied ✓</div>
 <textarea id="rptArea" style="position:absolute;opacity:0;pointer-events:none;top:0;left:0;width:1px;height:1px"></textarea>
@@ -610,6 +643,8 @@ function renderAll(){
   renderSection3();
   bindInputs();
   updateResults();
+  const el = document.getElementById('resetStageNum');
+  if(el) el.textContent = STATE.stage;
 }
 
 // ── AUTO-RESIZE: tell parent iframe how tall we are ───────────────────
