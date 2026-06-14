@@ -12,3 +12,4 @@ kaleido
 tabulate
 fitparse
 urllib.parse
+datetime
