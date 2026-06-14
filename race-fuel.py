@@ -300,7 +300,7 @@ hr{border:none;border-top:1px solid #E2DDD1;margin:0}
 
 <!-- SEND -->
 <div class="send-wrap">
-  <a id="waBtn" href="#" class="wa-btn">📱 WhatsApp</a>
+  <div class="wa-btn" onclick="openWhatsApp()">📱 WhatsApp</div>
   <div class="copy-btn" onclick="copyReport()">📋 Copy</div>
 </div>
 <div class="reset-lnk" onclick="resetStage()">🔄 Reset this stage</div>
@@ -572,6 +572,12 @@ function buildReport(){
   return lines.join('\\n');
 }
 
+function openWhatsApp(){
+  const txt = buildReport();
+  const url = 'https://wa.me/?text=' + encodeURIComponent(txt);
+  window.open(url, '_blank');
+}
+
 function copyReport(){
   const txt=buildReport();
   const area=document.getElementById('rptArea');
@@ -590,11 +596,6 @@ function showToast(){
   setTimeout(()=>t.classList.remove('show'),2000);
 }
 
-function updateWA(){
-  const txt=buildReport();
-  document.getElementById('waBtn').href='https://wa.me/?text='+encodeURIComponent(txt);
-}
-
 function resetStage(){
   if(!confirm('Reset Stage '+STATE.stage+'?')) return;
   STATE.stages[STATE.stage]=blankStage();
@@ -609,11 +610,7 @@ function renderAll(){
   renderSection3();
   bindInputs();
   updateResults();
-  updateWA();
 }
-
-// Auto-update WA link
-setInterval(updateWA, 2000);
 
 // ── AUTO-RESIZE: tell parent iframe how tall we are ───────────────────
 function sendHeight(){
