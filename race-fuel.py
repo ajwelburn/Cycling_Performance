@@ -529,11 +529,11 @@ def build_report():
         '',
         '— CALCULATED —',
         f"Carbs (race): {fmt(c['carbs'], 0)} g",
-        f"Carbs/h: {('—' if c['carbs_h'] is None else f\"{round(c['carbs_h'])} g/h\")}",
+        "Carbs/h: " + ("—" if c['carbs_h'] is None else str(round(c['carbs_h'])) + " g/h"),
         f"Fluid (race): {fmt(c['fluid_race']/1000, 2)} L",
-        f"Fluid/h: {('—' if c['fluid_h'] is None else f\"{round(c['fluid_h'])} ml/h\")}",
-        f"Dehydration: {('—' if c['dehyd'] is None else f\"{fmt(c['dehyd'], 1)} %\")}",
-        f"Sweat rate: {('—' if c['sweat_rate'] is None else f\"{fmt(c['sweat_rate'], 2)} L/h\")}",
+        "Fluid/h: " + ("—" if c['fluid_h'] is None else str(round(c['fluid_h'])) + " ml/h"),
+        "Dehydration: " + ("—" if c['dehyd'] is None else fmt(c['dehyd'], 1) + " %"),
+        "Sweat rate: " + ("—" if c['sweat_rate'] is None else fmt(c['sweat_rate'], 2) + " L/h"),
     ]
     return '\n'.join(lines)
 
