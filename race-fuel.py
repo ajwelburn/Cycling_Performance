@@ -105,7 +105,7 @@ hr{border:none;border-top:1px solid #E2DDD1;margin:0}
 .s-val{width:56px;height:52px;display:flex;align-items:center;justify-content:center;
   background:#fff;border-top:1.5px solid #E2DDD1;border-bottom:1.5px solid #E2DDD1;
   font-family:monospace;font-weight:700;font-size:24px;color:#16140F;
-  text-align:center}
+  text-align:center;line-height:52px}
 
 /* NUMBER INPUT ROW */
 .num-right{display:flex;align-items:center;flex-shrink:0}
@@ -113,6 +113,8 @@ hr{border:none;border-top:1px solid #E2DDD1;margin:0}
   border-radius:10px 0 0 10px;border-right:none;
   font-family:monospace;font-weight:700;font-size:20px;
   text-align:center;background:#fff;color:#16140F;
+  display:flex;align-items:center;justify-content:center;
+  padding:0;line-height:52px;
   -moz-appearance:textfield}
 .num-input::-webkit-inner-spin-button,.num-input::-webkit-outer-spin-button{display:none}
 .num-input:focus{outline:none;border-color:#2F3C82;
@@ -610,13 +612,41 @@ function renderAll(){
   updateWA();
 }
 
-// Auto-update WA link when results might change
+// Auto-update WA link
 setInterval(updateWA, 2000);
+
+// ── AUTO-RESIZE: tell parent iframe how tall we are ───────────────────
+function sendHeight(){
+  const h = document.body.scrollHeight;
+  window.parent.postMessage({type:'setHeight',height:h},'*');
+}
+// Send after every render and on any DOM mutation
+const ro = new ResizeObserver(sendHeight);
+ro.observe(document.body);
 
 // ── INIT ──────────────────────────────────────────────────────────────
 renderAll();
+sendHeight();
 </script>
 </body>
 </html>"""
 
-components.html(HTML, height=2800, scrolling=True)
+# Receive height messages and resize the iframe via a wrapper component
+import streamlit.components.v1 as components
+
+# Inject a listener in the Streamlit page that resizes the iframe
+st.markdown("""
+<style>
+#fuelpro-frame { width:100%; border:none; display:block; }
+</style>
+<script>
+window.addEventListener('message', function(e){
+  if(e.data && e.data.type === 'setHeight'){
+    var f = document.getElementById('fuelpro-frame');
+    if(f) f.style.height = (e.data.height + 8) + 'px';
+  }
+});
+</script>
+""", unsafe_allow_html=True)
+
+components.html(HTML, height=2900, scrolling=False)
