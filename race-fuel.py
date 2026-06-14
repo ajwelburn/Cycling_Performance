@@ -24,10 +24,10 @@ header[data-testid="stHeader"], footer, #MainMenu,
 }
 [data-testid="stVerticalBlock"] { gap:0 !important; }
 
-/* ── all st.button base ── */
+/* ── base button ── */
 div.stButton > button {
     font-family:'Hanken Grotesk',sans-serif !important;
-    font-weight:800 !important;
+    font-weight:700 !important;
     background:#FBFAF6 !important;
     color:#16140F !important;
     border:1.5px solid #E2DDD1 !important;
@@ -37,28 +37,72 @@ div.stButton > button {
     padding:0 !important;
 }
 div.stButton > button:hover { background:#F0EDE5 !important; }
-div.stButton > button:active { transform:scale(0.94) !important; }
+div.stButton > button:active { transform:scale(0.93) !important; }
 
-/* ── MINUS button ── */
+/* ── stage chips — always 44 px, Anton font ── */
+.stagechip div.stButton > button {
+    height:44px !important;
+    font-family:'Anton',sans-serif !important;
+    font-size:18px !important;
+    border-radius:8px !important;
+}
+
+/* ── stepper minus ── */
 .btn-minus div.stButton > button {
-    height:56px !important;
-    font-size:30px !important;
+    height:52px !important;
+    font-size:28px !important;
+    font-weight:900 !important;
     background:#FFF0F0 !important;
     color:#C0392B !important;
     border-color:#F5C6C6 !important;
-    border-radius:12px !important;
+    border-radius:10px !important;
 }
-/* ── PLUS button ── */
+/* ── stepper plus ── */
 .btn-plus div.stButton > button {
-    height:56px !important;
-    font-size:30px !important;
-    background:#F0F4FF !important;
+    height:52px !important;
+    font-size:28px !important;
+    font-weight:900 !important;
+    background:#EEF2FF !important;
     color:#2F3C82 !important;
     border-color:#C6CEEF !important;
-    border-radius:12px !important;
+    border-radius:10px !important;
 }
 
-/* hide built-in number steppers */
+/* ── urine swatch buttons: coloured, square, numbered ── */
+.sw1 div.stButton > button { background:#FFFDE8 !important; color:#5a5830 !important; }
+.sw2 div.stButton > button { background:#FFFAB6 !important; color:#5a5830 !important; }
+.sw3 div.stButton > button { background:#F8EF66 !important; color:#3d3b10 !important; }
+.sw4 div.stButton > button { background:#FDE11C !important; color:#3d3b10 !important; }
+.sw5 div.stButton > button { background:#ECD247 !important; color:#3d3b10 !important; }
+.sw6 div.stButton > button { background:#E4C306 !important; color:#3d3b10 !important; }
+.sw7 div.stButton > button { background:#DAB002 !important; color:#fff !important; }
+.sw8 div.stButton > button { background:#8C881C !important; color:#fff !important; }
+
+/* all swatches: tall, bold, monospace number */
+.sw1 div.stButton > button,
+.sw2 div.stButton > button,
+.sw3 div.stButton > button,
+.sw4 div.stButton > button,
+.sw5 div.stButton > button,
+.sw6 div.stButton > button,
+.sw7 div.stButton > button,
+.sw8 div.stButton > button {
+    height:64px !important;
+    font-family:'JetBrains Mono',monospace !important;
+    font-size:16px !important;
+    font-weight:900 !important;
+    border-radius:10px !important;
+    border-color:rgba(0,0,0,.1) !important;
+}
+
+/* selected swatch ring */
+.sw-sel div.stButton > button {
+    border:3px solid #2F3C82 !important;
+    box-shadow:0 0 0 3px rgba(47,60,130,.25) !important;
+    transform:translateY(-3px) !important;
+}
+
+/* number inputs */
 button[data-testid="stNumberInputStepUp"],
 button[data-testid="stNumberInputStepDown"] { display:none !important; }
 
@@ -71,7 +115,7 @@ input[type="number"] {
     border:1.5px solid #E2DDD1 !important;
     border-radius:10px !important;
     color:#16140F !important;
-    height:56px !important;
+    height:52px !important;
 }
 input[type="number"]:focus {
     border-color:#2F3C82 !important;
@@ -82,12 +126,11 @@ input[type="number"]:focus {
     font-family:'Hanken Grotesk',sans-serif !important;
     font-weight:600 !important; font-size:14px !important;
 }
-
 [data-testid="stExpander"] {
     background:#fff !important;
     border:1px solid #E2DDD1 !important;
     border-radius:12px !important;
-    margin-top:6px !important;
+    margin-top:4px !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -134,10 +177,10 @@ def calc():
     pre, post = g('preW') or 0, g('postW') or 0
     m0 = (pre  + pre_d/1000)  if pre  > 0 else None
     m1 = (post - post_f/1000) if post > 0 else None
-    deficit    = (m0-m1)                       if m0 and m1           else None
-    dehyd      = deficit/m0*100                if deficit and m0      else None
-    sweat      = deficit+fluid/1000-pee/1000   if deficit is not None else None
-    sweat_rate = sweat/h                       if sweat and h > 0     else None
+    deficit    = (m0-m1)                      if m0 and m1           else None
+    dehyd      = deficit/m0*100               if deficit and m0      else None
+    sweat      = deficit+fluid/1000-pee/1000  if deficit is not None else None
+    sweat_rate = sweat/h                      if sweat and h > 0     else None
     return dict(bv=bv, scale=scale, h=h, carbs=carbs, fluid=fluid,
                 carbs_h=carbs/h if h>0 else None,
                 fluid_h=fluid/h if h>0 else None,
@@ -163,8 +206,8 @@ def build_report(c):
         f"Gels: {int(g('gels'))}  ({int(g('gels'))*40} g carbs)",
         f"Chews: {int(g('chews'))}  ({int(g('chews'))*35} g carbs)",
         f"Bars: {int(g('bars'))}  ({int(g('bars'))*30} g carbs)",
-        f"Bottles 30g·{bv}ml: {int(g('bidonsKH'))}  ({int(g('bidonsKH'))*c30}g carbs · {int(g('bidonsKH'))*bv}ml)",
-        f"Bottles 60g·{bv}ml: {int(g('bidons60'))}  ({int(g('bidons60'))*c60}g carbs · {int(g('bidons60'))*bv}ml)",
+        f"Bottles 30g·{bv}ml: {int(g('bidonsKH'))}  ({int(g('bidonsKH'))*c30}g carbs·{int(g('bidonsKH'))*bv}ml)",
+        f"Bottles 60g·{bv}ml: {int(g('bidons60'))}  ({int(g('bidons60'))*c60}g carbs·{int(g('bidons60'))*bv}ml)",
         f"Bottles water·{bv}ml: {int(g('bidonsW'))}  ({int(g('bidonsW'))*bv}ml)",
         f"Other food: {fmt(g('otherFood'),0)} g",
         f"Other drinks: {fmt(g('otherDrinks'),0)} ml",
@@ -195,100 +238,89 @@ def section_header(num, title, sub):
     st.markdown(f"""
 <div style="background:#fff;border:1px solid #E2DDD1;border-radius:12px;
      box-shadow:0 2px 12px rgba(22,20,15,.07);
-     padding:12px 14px;margin:16px 0 10px;
-     display:flex;align-items:center;gap:10px;">
-  <div style="width:32px;height:32px;border-radius:8px;background:#1E274F;color:#fff;
+     padding:14px 16px;margin:14px 0 8px;
+     display:flex;align-items:center;gap:12px;">
+  <div style="width:34px;height:34px;border-radius:9px;background:#1E274F;color:#fff;
        display:flex;align-items:center;justify-content:center;
-       font-family:'Anton',sans-serif;font-size:16px;flex-shrink:0;">{num}</div>
+       font-family:'Anton',sans-serif;font-size:17px;flex-shrink:0;">{num}</div>
   <div>
-    <div style="font-family:'Anton',sans-serif;font-size:17px;letter-spacing:.4px;
+    <div style="font-family:'Anton',sans-serif;font-size:18px;letter-spacing:.5px;
          text-transform:uppercase;color:#16140F;line-height:1.1;">{title}</div>
     <div style="font-family:'JetBrains Mono',monospace;font-size:9px;
-         letter-spacing:.12em;text-transform:uppercase;color:#6B6760;margin-top:2px;">{sub}</div>
+         letter-spacing:.14em;text-transform:uppercase;color:#6B6760;margin-top:2px;">{sub}</div>
   </div>
 </div>""", unsafe_allow_html=True)
 
-def row_label(label, hint=""):
-    h = f"<span style='font-size:11px;color:#6B6760;font-weight:500;margin-left:6px;'>{hint}</span>" if hint else ""
+def divider():
     st.markdown(
-        f"<div style='font-family:Hanken Grotesk,sans-serif;font-weight:700;"
-        f"font-size:14px;color:#16140F;margin:10px 0 4px;'>{label}{h}</div>",
+        "<hr style='border:none;border-top:1px solid #E2DDD1;margin:6px 0;'>",
         unsafe_allow_html=True)
 
-def divider():
-    st.markdown("<hr style='border:none;border-top:1px solid #E2DDD1;margin:8px 0;'>",
-                unsafe_allow_html=True)
-
 def stepper(label, hint, field, carb_per_unit=0, fluid_per_unit=0):
-    """Compact single-row: LABEL · hint  [−] [  N  ] [+]  subtotal"""
+    """Single row: [Label · subtotal] [-] [N] [+]"""
     val = int(g(field) or 0)
+    parts = []
+    if carb_per_unit  > 0: parts.append(f"{val*carb_per_unit}g")
+    if fluid_per_unit > 0: parts.append(f"{val*fluid_per_unit}ml")
+    sub = ""
+    if parts:
+        col = "#2F3C82" if val > 0 else "#9B9790"
+        sub = (f"<span style='color:{col};font-family:JetBrains Mono,monospace;"
+               f"font-size:11px;font-weight:700;margin-left:5px;'>"
+               f"{'·'.join(parts)}</span>")
+    hint_h = (f"<div style='font-size:11px;color:#6B6760;margin-top:1px;'>{hint}</div>"
+              if hint else "")
 
-    # Full-width row: label takes left space, controls take right
-    col_label, col_minus, col_val, col_plus = st.columns([3, 1, 1, 1])
-
-    with col_label:
-        # Build subtotal string
-        parts = []
-        if carb_per_unit > 0: parts.append(f"{val*carb_per_unit}g")
-        if fluid_per_unit > 0: parts.append(f"{val*fluid_per_unit}ml")
-        sub_html = ""
-        if parts:
-            c = "#2F3C82" if val > 0 else "#9B9790"
-            sub_html = f"<span style='color:{c};font-family:JetBrains Mono,monospace;font-size:11px;font-weight:700;margin-left:4px;'>{'·'.join(parts)}</span>"
-        hint_html = f"<div style='font-size:11px;color:#6B6760;margin-top:1px;'>{hint}</div>" if hint else ""
+    cl, cm, cv, cp = st.columns([3, 1, 1, 1])
+    with cl:
         st.markdown(
-            f"<div style='padding:6px 0;'>"
-            f"<span style='font-family:Hanken Grotesk,sans-serif;font-weight:700;"
-            f"font-size:14px;color:#16140F;'>{label}</span>{sub_html}"
-            f"{hint_html}</div>",
+            f"<div style='padding:6px 0 4px;font-family:Hanken Grotesk,sans-serif;"
+            f"font-weight:700;font-size:15px;color:#16140F;'>{label}{sub}{hint_h}</div>",
             unsafe_allow_html=True)
-
-    with col_minus:
+    with cm:
         st.markdown('<div class="btn-minus">', unsafe_allow_html=True)
-        if st.button("−", key=f"dec_{field}_{st.session_state.stage}"):
+        if st.button("−", key=f"d_{field}_{st.session_state.stage}"):
             sv(field, max(0, val-1)); st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
-
-    with col_val:
+    with cv:
         st.markdown(
-            f"<div style='height:56px;background:#fff;border:1.5px solid #E2DDD1;"
+            f"<div style='height:52px;background:#fff;border:1.5px solid #E2DDD1;"
             f"border-radius:10px;display:flex;align-items:center;justify-content:center;"
-            f"font-family:JetBrains Mono,monospace;font-weight:700;font-size:26px;"
-            f"color:#16140F;'>{val}</div>",
-            unsafe_allow_html=True)
-
-    with col_plus:
+            f"font-family:JetBrains Mono,monospace;font-weight:700;font-size:24px;"
+            f"color:#16140F;'>{val}</div>", unsafe_allow_html=True)
+    with cp:
         st.markdown('<div class="btn-plus">', unsafe_allow_html=True)
-        if st.button("+", key=f"inc_{field}_{st.session_state.stage}"):
+        if st.button("+", key=f"i_{field}_{st.session_state.stage}"):
             sv(field, val+1); st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
-
     divider()
 
-def num_row(label, hint, field, unit, min_v, max_v, step, fmt_str=None, is_float=False):
-    """Compact row: label/hint left, [input][unit] right."""
+def num_row(label, hint, field, unit, min_v, max_v, step,
+            fmt_str=None, is_float=False):
+    """Single row: [Label / hint]  [input  unit]"""
     val = float(g(field) or 0) if is_float else int(g(field) or 0)
-    col_label, col_input, col_unit = st.columns([3, 2, 1])
-    with col_label:
-        hint_html = f"<div style='font-size:11px;color:#6B6760;margin-top:1px;'>{hint}</div>" if hint else ""
+    cl, ci, cu = st.columns([3, 2, 1])
+    with cl:
+        hint_h = (f"<div style='font-size:11px;color:#6B6760;margin-top:1px;'>{hint}</div>"
+                  if hint else "")
         st.markdown(
-            f"<div style='padding:6px 0;'>"
-            f"<span style='font-family:Hanken Grotesk,sans-serif;font-weight:700;"
-            f"font-size:14px;color:#16140F;'>{label}</span>{hint_html}</div>",
+            f"<div style='padding:6px 0 4px;font-family:Hanken Grotesk,sans-serif;"
+            f"font-weight:700;font-size:15px;color:#16140F;'>{label}{hint_h}</div>",
             unsafe_allow_html=True)
-    with col_input:
-        kwargs = dict(min_value=min_v, max_value=max_v, value=val, step=step,
-                      label_visibility="collapsed",
-                      key=f"{field}_{st.session_state.stage}")
-        if fmt_str: kwargs['format'] = fmt_str
-        nv = st.number_input(label, **kwargs)
+    with ci:
+        kw = dict(min_value=min_v, max_value=max_v, value=val, step=step,
+                  label_visibility="collapsed",
+                  key=f"{field}_{st.session_state.stage}")
+        if fmt_str: kw['format'] = fmt_str
+        nv = st.number_input(label, **kw)
         sv(field, nv)
-    with col_unit:
+    with cu:
         st.markdown(
-            f"<div style='height:56px;display:flex;align-items:center;justify-content:center;"
-            f"font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;"
-            f"color:#4A463C;background:#F0EDE5;border:1.5px solid #E2DDD1;"
-            f"border-radius:10px;margin-top:1px;'>{unit}</div>",
+            f"<div style='height:52px;display:flex;align-items:center;"
+            f"justify-content:center;font-family:JetBrains Mono,monospace;"
+            f"font-size:13px;font-weight:700;color:#4A463C;"
+            f"background:#F0EDE5;border:1.5px solid #E2DDD1;"
+            f"border-radius:10px;'>{unit}</div>",
             unsafe_allow_html=True)
     divider()
 
@@ -303,149 +335,148 @@ st.markdown("""
   border-bottom:4px solid #E5343A;margin:0 -10px;">
   <div style="height:5px;background:repeating-linear-gradient(
     135deg,#2F3C82 0 12px,#E5343A 12px 24px);"></div>
-  <div style="padding:18px 16px 16px;">
-    <div style="font-family:'Anton',sans-serif;font-size:clamp(32px,10vw,48px);
+  <div style="padding:20px 18px 18px;">
+    <div style="font-family:'Anton',sans-serif;font-size:clamp(34px,10vw,50px);
          line-height:.9;text-transform:uppercase;color:#fff;
          text-shadow:0 2px 12px rgba(0,0,0,.3);">
       RIDE<span style="color:#FFD7CF;">·</span>LOG</div>
-    <p style="margin:8px 0 0;color:rgba(255,255,255,.75);font-size:12px;
-       font-family:'Hanken Grotesk',sans-serif;">
+    <p style="margin:10px 0 0;color:rgba(255,255,255,.78);font-size:13px;
+       font-family:'Hanken Grotesk',sans-serif;max-width:38ch;">
       Fill in after each stage · tap Send when done</p>
   </div>
 </div>
-<div style="height:6px;"></div>
+<div style="height:8px;"></div>
 """, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════
-# STAGE PICKER  — pure HTML buttons, all identical size
+# STAGE PICKER  — 4×2 grid matching the HTML screenshots
 # ══════════════════════════════════════════════════════════════════════
-stage = st.session_state.stage
+with st.container(border=True):
+    st.markdown(
+        "<div style='font-family:JetBrains Mono,monospace;font-size:10px;"
+        "letter-spacing:.18em;text-transform:uppercase;color:#6B6760;"
+        "font-weight:700;margin-bottom:8px;'>Stage</div>",
+        unsafe_allow_html=True)
 
-# Render 8 stage buttons in one tight row using st.columns
-# All columns equal width — no HTML tricks needed
-st.markdown(
-    "<div style='font-family:JetBrains Mono,monospace;font-size:10px;"
-    "letter-spacing:.18em;text-transform:uppercase;color:#6B6760;"
-    "font-weight:700;margin:0 0 6px 0;'>Stage</div>",
-    unsafe_allow_html=True)
+    # Row 1: stages 1-4
+    row1 = st.columns(4)
+    for i, col in enumerate(row1):
+        n = i + 1
+        sel = st.session_state.stage == n
+        with col:
+            if sel:
+                st.markdown(
+                    f"<div style='height:44px;background:#2F3C82;color:#fff;"
+                    f"border:2px solid #1E274F;border-radius:8px;"
+                    f"display:flex;align-items:center;justify-content:center;"
+                    f"font-family:Anton,sans-serif;font-size:18px;"
+                    f"box-shadow:0 2px 8px rgba(47,60,130,.4);'>{n}</div>",
+                    unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="stagechip">', unsafe_allow_html=True)
+                if st.button(str(n), key=f"s{n}"):
+                    st.session_state.stage = n; st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
 
-stage_cols = st.columns(8)
-for i, col in enumerate(stage_cols):
-    n = i + 1
-    with col:
-        sel = (stage == n)
-        # Use st.markdown for selected (can't click it anyway) and st.button for unselected
-        if sel:
-            st.markdown(f"""
-<div style="height:44px;background:#2F3C82;color:#fff;
-     border:2px solid #1E274F;border-radius:10px;
-     display:flex;align-items:center;justify-content:center;
-     font-family:'Anton',sans-serif;font-size:18px;
-     box-shadow:0 2px 8px rgba(47,60,130,.4);">✓</div>""",
-                unsafe_allow_html=True)
-        else:
-            # Inject CSS just for these to be the right height
-            st.markdown("""
-<style>
-div[data-testid="column"] div.stButton > button {
-    height:44px !important;
-    font-family:'Anton',sans-serif !important;
-    font-size:18px !important;
-    border-radius:10px !important;
-    padding:0 !important;
-}
-</style>""", unsafe_allow_html=True)
-            if st.button(str(n), key=f"stage_{n}"):
-                st.session_state.stage = n
-                st.rerun()
+    st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
 
-st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
+    # Row 2: stages 5-8
+    row2 = st.columns(4)
+    for i, col in enumerate(row2):
+        n = i + 5
+        sel = st.session_state.stage == n
+        with col:
+            if sel:
+                st.markdown(
+                    f"<div style='height:44px;background:#2F3C82;color:#fff;"
+                    f"border:2px solid #1E274F;border-radius:8px;"
+                    f"display:flex;align-items:center;justify-content:center;"
+                    f"font-family:Anton,sans-serif;font-size:18px;"
+                    f"box-shadow:0 2px 8px rgba(47,60,130,.4);'>{n}</div>",
+                    unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="stagechip">', unsafe_allow_html=True)
+                if st.button(str(n), key=f"s{n}"):
+                    st.session_state.stage = n; st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════
 # SECTION 1 — BEFORE THE START
 # ══════════════════════════════════════════════════════════════════════
 section_header("1", "Before the Start", "Pre-stage")
 
-# URINE — 8 buttons in a row, the coloured swatch IS the button
-# We render each as an st.button whose label is the number,
-# then use CSS to make them tall and coloured via a data attribute trick.
-# Simplest reliable approach: render the colour as the button background via per-button CSS.
+# Urine colour — coloured BUTTONS in a 4×2 grid, exactly like the HTML screenshots.
+# Each button IS the coloured swatch. CSS gives it the right background colour.
+# Selected swatch gets a blue border ring.
+st.markdown(
+    "<div style='font-family:Hanken Grotesk,sans-serif;font-weight:700;"
+    "font-size:15px;color:#16140F;margin:6px 0 2px;'>Urine colour</div>"
+    "<div style='font-size:11px;color:#6B6760;margin-bottom:8px;'>"
+    "Tap the shade that matches yours — 1 = pale (well hydrated), 8 = dark (dehydrated)</div>",
+    unsafe_allow_html=True)
 
-SWATCHES = ['#FFFDE8','#FFFAB6','#F8EF66','#FDE11C','#ECD247','#E4C306','#DAB002','#8C881C']
-SWATCH_TEXT = ['#5a5830','#5a5830','#3d3b10','#3d3b10','#3d3b10','#3d3b10','#fff','#fff']
-
-st.markdown("<div style='font-family:Hanken Grotesk,sans-serif;font-weight:700;"
-            "font-size:14px;color:#16140F;margin:8px 0 2px;'>Urine colour</div>"
-            "<div style='font-size:11px;color:#6B6760;margin-bottom:6px;'>"
-            "1 = pale (hydrated) → 8 = dark (dehydrated)</div>",
-            unsafe_allow_html=True)
-
-# Inject per-button background colours. Each button gets a unique key we can target.
+SWATCH_CSS = ['sw1','sw2','sw3','sw4','sw5','sw6','sw7','sw8']
 urine_val = sdata().get('urine')
-for i in range(8):
-    v   = i + 1
-    sel = urine_val == v
-    bg  = SWATCHES[i]
-    tc  = SWATCH_TEXT[i]
-    bdr = "#2F3C82" if sel else "rgba(0,0,0,.08)"
-    bw  = "3px" if sel else "1.5px"
-    shd = "0 0 0 3px rgba(47,60,130,.25)" if sel else "none"
-    lbl = "✓" if sel else str(v)
-    st.markdown(f"""
-<style>
-div[data-testid="column"]:nth-of-type({i+1}) .stButton > button {{
-    background:{bg} !important;
-    color:{tc} !important;
-    border:{bw} solid {bdr} !important;
-    box-shadow:{shd} !important;
-    height:52px !important;
-    font-family:'JetBrains Mono',monospace !important;
-    font-size:14px !important;
-    font-weight:900 !important;
-    border-radius:10px !important;
-    transform:{'translateY(-3px)' if sel else 'none'} !important;
-}}
-</style>""", unsafe_allow_html=True)
 
-u_cols = st.columns(8)
-for i, col in enumerate(u_cols):
+# Row 1: shades 1-4
+ur1 = st.columns(4)
+for i, col in enumerate(ur1):
     v = i + 1
     sel = urine_val == v
+    css = SWATCH_CSS[i] + (' sw-sel' if sel else '')
     lbl = "✓" if sel else str(v)
     with col:
-        if st.button(lbl, key=f"uc_{v}_s{st.session_state.stage}"):
-            sdata()['urine'] = v
-            st.rerun()
+        st.markdown(f'<div class="{css}">', unsafe_allow_html=True)
+        if st.button(lbl, key=f"u{v}s{st.session_state.stage}"):
+            sdata()['urine'] = v; st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
+st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
+
+# Row 2: shades 5-8
+ur2 = st.columns(4)
+for i, col in enumerate(ur2):
+    v = i + 5
+    sel = urine_val == v
+    css = SWATCH_CSS[v-1] + (' sw-sel' if sel else '')
+    lbl = "✓" if sel else str(v)
+    with col:
+        st.markdown(f'<div class="{css}">', unsafe_allow_html=True)
+        if st.button(lbl, key=f"u{v}s{st.session_state.stage}"):
+            sdata()['urine'] = v; st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
 divider()
 
-# Weight & drink
-bv  = g('bidonVol') or 500
-num_row("Weight before",       "Before the race",    'preW',     "kg", 0.0, 200.0, 0.1, "%.1f", True)
-num_row("Drink before start",  "Weigh-in → start",   'preDrink', "ml", 0, 5000, 50)
+num_row("Weight before",      "At the weigh-in, just before the race",
+        'preW',    "kg", 0.0, 200.0, 0.1, "%.1f", True)
+num_row("Drink before start", "Fluid drunk between weigh-in and the start",
+        'preDrink',"ml", 0,   5000,  50)
 
 # ══════════════════════════════════════════════════════════════════════
 # SECTION 2 — DURING THE RIDE
 # ══════════════════════════════════════════════════════════════════════
 section_header("2", "During the Ride", "On the bike")
 
+bv    = g('bidonVol') or 500
 scale = bv / 500
 c30   = round(30*scale)
 c60   = round(60*scale)
 
-stepper("Gels",            "40g carbs each",         "gels",     carb_per_unit=40)
-stepper("Chews",           "35g carbs each",         "chews",    carb_per_unit=35)
-stepper("Bars",            "30g carbs each",         "bars",     carb_per_unit=30)
-stepper(f"Bottles 30g",    f"{c30}g carbs · {bv}ml", "bidonsKH", carb_per_unit=c30, fluid_per_unit=bv)
-stepper(f"Bottles 60g",    f"{c60}g carbs · {bv}ml", "bidons60", carb_per_unit=c60, fluid_per_unit=bv)
-stepper("Bottles water",   f"{bv}ml each",           "bidonsW",  fluid_per_unit=bv)
-num_row("Other food",      "Extra food weight",      'otherFood',   "g",  0, 10000, 1)
-num_row("Other drinks",    "Extra drinks on bike",   'otherDrinks', "ml", 0, 10000, 50)
+stepper("Gels",           "45 g · 40 g carbs",          "gels",     carb_per_unit=40)
+stepper("Chews",          "44 g · 35 g carbs",           "chews",    carb_per_unit=35)
+stepper("Bars",           "35 g · 30 g carbs",           "bars",     carb_per_unit=30)
+stepper("Bottles · 30 g", f"{c30} g carbs at {bv} ml",  "bidonsKH", carb_per_unit=c30, fluid_per_unit=bv)
+stepper("Bottles · 60 g", f"{c60} g carbs at {bv} ml",  "bidons60", carb_per_unit=c60, fluid_per_unit=bv)
+stepper("Bottles · water",f"water only · {bv} ml each",  "bidonsW",  fluid_per_unit=bv)
+num_row("Other food",     "Total weight of any extra food",  'otherFood',   "g",  0, 10000, 1)
+num_row("Other drinks",   "Any extra drinks on the bike",    'otherDrinks', "ml", 0, 10000, 50)
 
-with st.expander("⚙️  Bottle & pee settings"):
-    num_row("Bottle volume", "", 'bidonVol', "ml", 100, 2000, 50)
-    stepper("Pee stops",    "Toilet stops",           "peeStops")
-    num_row("Pee volume",   "Optional",               'peeMl', "ml", 0, 5000, 50)
+with st.expander("⚙️  Bottle volume & pee settings"):
+    num_row("Volume per bottle", "Default 500 ml", 'bidonVol', "ml", 100, 2000, 50)
+    stepper("Pee stops",  "Number of toilet stops", "peeStops")
+    num_row("Pee volume", "Optional — if measured", 'peeMl', "ml", 0, 5000, 50)
 
 # ══════════════════════════════════════════════════════════════════════
 # SECTION 3 — AFTER THE RIDE
@@ -454,39 +485,49 @@ section_header("3", "After the Ride", "Before weigh-in")
 
 st.markdown("""
 <div style="background:#FFF5F5;border-left:4px solid #E5343A;border-radius:8px;
-     padding:10px 12px;margin-bottom:8px;font-size:12px;font-weight:600;color:#6B1A1A;">
+     padding:10px 12px;margin-bottom:10px;
+     font-size:12px;font-weight:600;color:#6B1A1A;
+     font-family:'Hanken Grotesk',sans-serif;">
   ⚠️ Only log drinks consumed <b>before</b> the post-ride weigh-in.
 </div>""", unsafe_allow_html=True)
 
-stepper("Soda",           "330ml each",  "soda",  fluid_per_unit=330)
-stepper("Recovery drink", "500ml each",  "recup", fluid_per_unit=500)
-num_row("Water",          "After finish",'waterPost', "ml", 0, 5000, 50)
+stepper("Soda",           "330 ml each", "soda",  fluid_per_unit=330)
+stepper("Recovery drink", "500 ml each", "recup", fluid_per_unit=500)
+num_row("Water",          "Loose water after the finish", 'waterPost', "ml", 0, 5000, 50)
 
 # ══════════════════════════════════════════════════════════════════════
 # SECTION 4 — WEIGH-IN AFTER RIDE
 # ══════════════════════════════════════════════════════════════════════
 section_header("4", "Weigh-In After Ride", "Post weigh-in")
-num_row("Weight after", "After the ride", 'postW', "kg", 0.0, 200.0, 0.1, "%.1f", True)
+num_row("Weight after", "At the weigh-in after the ride",
+        'postW', "kg", 0.0, 200.0, 0.1, "%.1f", True)
 
 # ══════════════════════════════════════════════════════════════════════
 # SECTION 5 — RACE TIME + RESULTS
-# calc() called here — all inputs now written to sdata()
+# calc() runs here — all inputs already written to sdata()
 # ══════════════════════════════════════════════════════════════════════
 section_header("5", "Race Time", "Duration & results")
 
-c1, c2 = st.columns(2)
-with c1:
-    rh = st.number_input("Hours", min_value=0, max_value=24,
+st.markdown(
+    "<div style='font-family:Hanken Grotesk,sans-serif;font-weight:700;"
+    "font-size:15px;color:#16140F;margin:6px 0 2px;'>Total race time</div>"
+    "<div style='font-size:11px;color:#6B6760;margin-bottom:4px;'>"
+    "Elapsed time of the stage</div>",
+    unsafe_allow_html=True)
+
+tc1, tc2 = st.columns(2)
+with tc1:
+    rh = st.number_input("h", min_value=0, max_value=24,
                           value=int(g('raceH') or 0),
                           key=f"raceH_{st.session_state.stage}")
     sv('raceH', rh)
-with c2:
-    rm = st.number_input("Minutes", min_value=0, max_value=59,
+with tc2:
+    rm = st.number_input("min", min_value=0, max_value=59,
                           value=int(g('raceM') or 0),
                           key=f"raceM_{st.session_state.stage}")
     sv('raceM', rm)
 
-# ── all inputs written → run calc ──
+# ── all inputs written — run calc ──
 cr = calc()
 
 def dehyd_color(v):
